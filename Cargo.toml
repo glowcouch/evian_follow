@@ -1,0 +1,8 @@
+[package]
+name = "evian_follow"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+evian = { git = "https://github.com/vexide/evian.git" }
+vexide = "0.8.0"
