@@ -1,9 +1,8 @@
+//! Alternative following algorithm to [`evian::motion::pursuit::PurePursuit`] that uses
+//! closed-loop feedback (such as pid) instead of arc-based turning.
 #![feature(iter_map_windows)]
-use std::{
-    pin::Pin,
-    task::Poll,
-    time::{Duration, Instant},
-};
+use core::{pin::Pin, task::Poll, time::Duration};
+use std::time::Instant;
 
 use evian::{
     control::loops::{AngularPid, Feedback, Pid},
@@ -14,14 +13,30 @@ use evian::{
 };
 use vexide::time::{Sleep, sleep};
 
+/// A path following controller that uses closed-loop feedback for turning and driving.
+///
+/// This is suitable for dense paths (curves) and sparse paths (waypoints).
 #[derive(Debug, Clone)]
 pub struct PathFollow {
+    /// Linear feedback controller.
+    ///
+    /// This controls the robot's speed throughout the motion.
     pub linear_controller: Pid,
+
+    /// Angular feedback controller.
+    ///
+    /// This controls the robot's heading throughout the motion.
     pub angular_controller: AngularPid,
+
+    /// Lookahead radius.
+    ///
+    /// Points are considered "visited" when they are within this radius. A smaller radius will
+    /// result in higher accuracy, but can cause more oscilation.
     pub lookahead: f64,
 }
 
 impl PathFollow {
+    /// Follow a set of waypoints.
     pub fn follow<M: Arcade, I: IntoIterator<Item = Waypoint>, T: TracksPosition + TracksHeading>(
         &self,
         drivetrain: &mut Drivetrain<M, T>,
@@ -54,35 +69,66 @@ impl PathFollow {
     }
 }
 
+/// State of [`PathFollowFuture`].
 struct State {
+    /// The current target waypoint.
+    ///
+    /// The robot will try to aim towards this position.
     current: Waypoint,
+    /// The current sleep timer.
+    ///
+    /// The future uses this to sleep in between updates.
     sleep: Sleep,
+
+    /// The previous time at which the controller was updated.
+    ///
+    /// This is used to calculate delta time.
     prev_time: Instant,
 }
 
+/// Future returned by [`PathFollow::follow`].
 struct PathFollowFuture<
     'a,
     I: Iterator<Item = Waypoint>,
     M: DrivetrainModel + Arcade,
     T: TracksPosition + TracksHeading,
 > {
+    /// The drivetrain being moved.
     drivetrain: &'a mut Drivetrain<M, T>,
+
+    /// The set of waypoints that the robot is following.
+    ///
+    /// A waypoint is consumed each time that the [`State::current`] waypoint is reached.
     waypoints: I,
-    /// The total distance between all the waypoints that are left
-    /// this must be updated whenever a waypoint is taken
+
+    /// The total distance between all the waypoints that are left.
+    ///
+    /// This must be updated whenever a waypoint is taken.
     path_distance: f64,
+
+    /// Linear feedback controller.
+    ///
+    /// This is copied directly from [`PathFollow`].
     linear_controller: Pid,
+
+    /// Angular feedback controller.
+    ///
+    /// This is copied directly from [`PathFollow`].
     angular_controller: AngularPid,
+
+    /// The lookahead radius.
+    ///
+    /// This is copied directly from [`PathFollow`].
     lookahead: f64,
+
+    /// The state of the motion.
+    ///
+    /// This stores information for use within the future.
     state: Option<State>,
 }
 
-impl<
-    'a,
-    I: Iterator<Item = Waypoint>,
-    M: DrivetrainModel + Arcade,
-    T: TracksPosition + TracksHeading,
-> PathFollowFuture<'a, I, M, T>
+impl<I: Iterator<Item = Waypoint>, M: DrivetrainModel + Arcade, T: TracksPosition + TracksHeading>
+    PathFollowFuture<'_, I, M, T>
 {
     /// returns a heuristic for the total distance left in the motion
     ///
@@ -100,42 +146,42 @@ impl<
 }
 
 impl<
-    'a,
     I: Iterator<Item = Waypoint> + Unpin,
     M: DrivetrainModel + Arcade,
     T: TracksPosition + TracksHeading,
-> Future for PathFollowFuture<'a, I, M, T>
+> Future for PathFollowFuture<'_, I, M, T>
 {
     type Output = ();
 
-    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut core::task::Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        // add state
-        if this.state.is_none() {
-            let next_waypoint = match this.waypoints.next() {
-                Some(w) => w,
-                None => return Poll::Ready(()),
+        // get state or initialize it
+        let state = if let Some(state) = this.state.as_mut() {
+            state
+        } else {
+            // return `Poll::Ready` if there are no more waypoints
+            let Some(next_waypoint) = this.waypoints.next() else {
+                return Poll::Ready(());
             };
-            this.state = Some(State {
+
+            // initialize state
+            this.state.insert(State {
                 current: next_waypoint,
                 sleep: sleep(Duration::from_millis(5)),
                 prev_time: Instant::now(),
-            });
-        }
-
-        // we know this unwrap is ok because we just initialized state
-        let state = this.state.as_mut().unwrap();
+            })
+        };
 
         // if the timer is not finished we go back to sleep
         // I have confirmed that calling poll on a `vexide::time::Sleep` will in fact register the
         // waker
         if Pin::new(&mut state.sleep).poll(cx).is_pending() {
             return Poll::Pending;
-        } else {
-            // start a new timer
-            state.sleep = sleep(Duration::from_millis(5));
         }
+
+        // start a new timer
+        state.sleep = sleep(Duration::from_millis(5));
 
         // get tracking data
         let position = this.drivetrain.tracking.position();
@@ -144,9 +190,8 @@ impl<
         // find the next point that we have not reached
         while state.current.position.distance(position) <= this.lookahead {
             // find next waypoint (or exit if we are finished)
-            let new_waypoint = match this.waypoints.next() {
-                Some(w) => w,
-                None => return Poll::Ready(()),
+            let Some(new_waypoint) = this.waypoints.next() else {
+                return Poll::Ready(());
             };
             // update the distance that is left on the path
             this.path_distance -= state.current.position.distance(new_waypoint.position);

@@ -6,3 +6,30 @@ edition = "2024"
 [dependencies]
 evian = { git = "https://github.com/vexide/evian.git" }
 vexide = "0.8.0"
+
+[lints.clippy]
+# pedantic lints
+std_instead_of_core = "forbid"
+std_instead_of_alloc = "forbid"
+alloc_instead_of_core = "forbid"
+missing_docs_in_private_items = "forbid"
+pedantic = "forbid"
+undocumented_unsafe_blocks = "forbid"
+
+# no panic lints
+panic = "forbid"
+unwrap_used = "forbid"
+expect_used = "forbid"
+exit = "forbid"
+todo = "forbid"
+indexing_slicing = "forbid"
+unreachable = "forbid"
+
+# reliability lints
+infinite_loop = "forbid"
+mem_forget = "forbid"
+await_holding_lock = "forbid"
+
+[lints.rust]
+# pedantic lints
+missing_docs = "forbid"
