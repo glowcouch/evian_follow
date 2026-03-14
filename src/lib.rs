@@ -132,6 +132,9 @@ impl<
         // waker
         if Pin::new(&mut state.sleep).poll(cx).is_pending() {
             return Poll::Pending;
+        } else {
+            // start a new timer
+            state.sleep = sleep(Duration::from_millis(5));
         }
 
         // get tracking data
@@ -153,6 +156,8 @@ impl<
 
         // get delta time
         let dt = state.prev_time.elapsed();
+        // update state
+        state.prev_time = Instant::now();
 
         // update angular controller
         let angular_setpoint = Angle::from_radians((state.current.position - position).angle());
@@ -167,6 +172,11 @@ impl<
         // drive the robot
         drop(this.drivetrain.model.drive_arcade(throttle, steer));
 
+        // wake ourselves once so that we can poll the timer (sleep)
+        //
+        // This doesn't cause a busy loop because we will return `Poll::Pending` once we poll the
+        // timer. It just makes sure that the timer has registered our waker
+        cx.waker().wake_by_ref();
         Poll::Pending
     }
 }
