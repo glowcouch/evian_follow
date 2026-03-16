@@ -211,11 +211,17 @@ impl<
             .update(heading, angular_setpoint, dt);
 
         // update linear controller
+        let velocity_limit = state.current.velocity; // have to store this in a variable here
+        // because of lifetimes
         let linear_setpoint = this.distance_heuristic(position);
         let throttle = this.linear_controller.update(0., linear_setpoint, dt);
 
         // drive the robot
-        drop(this.drivetrain.model.drive_arcade(throttle, steer));
+        drop(
+            this.drivetrain
+                .model
+                .drive_arcade(f64::max(throttle, velocity_limit), steer),
+        );
 
         // wake ourselves once so that we can poll the timer (sleep)
         //
