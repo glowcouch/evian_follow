@@ -1,7 +1,7 @@
 //! Alternative following algorithm to [`evian::motion::pursuit::PurePursuit`] that uses
 //! closed-loop feedback (such as pid) instead of arc-based turning.
 #![feature(iter_map_windows)]
-use core::{pin::Pin, task::Poll, time::Duration};
+use core::{iter::FusedIterator, pin::Pin, task::Poll, time::Duration};
 use std::time::Instant;
 
 use evian::{
@@ -9,7 +9,7 @@ use evian::{
     drivetrain::model::DrivetrainModel,
     math::{Angle, Vec2},
     motion::pursuit::Waypoint,
-    prelude::{Arcade, Drivetrain, TracksHeading, TracksPosition},
+    prelude::{Arcade, Drivetrain, Tolerances, TracksHeading, TracksPosition, TracksVelocity},
 };
 use vexide::time::{Sleep, sleep};
 
@@ -33,11 +33,21 @@ pub struct PathFollow {
     /// Points are considered "visited" when they are within this radius. A smaller radius will
     /// result in higher accuracy, but can cause more oscilation.
     pub lookahead: f64,
+
+    /// The tolerances used for settling.
+    ///
+    /// The error is the distance to the last point.
+    /// The velocity is linear velocity.
+    pub tolerances: Tolerances,
 }
 
 impl PathFollow {
     /// Follow a set of waypoints.
-    pub fn follow<M: Arcade, I: IntoIterator<Item = Waypoint>, T: TracksPosition + TracksHeading>(
+    pub fn follow<
+        M: Arcade,
+        I: IntoIterator<Item = Waypoint>,
+        T: TracksPosition + TracksHeading + TracksVelocity,
+    >(
         &self,
         drivetrain: &mut Drivetrain<M, T>,
         waypoints: I,
@@ -49,6 +59,7 @@ impl PathFollow {
             linear_controller,
             angular_controller,
             lookahead,
+            tolerances,
         } = self.clone();
         let waypoints = waypoints.into_iter();
         PathFollowFuture {
@@ -60,10 +71,11 @@ impl PathFollow {
                     window[0].position.distance(window[1].position)
                 })
                 .sum(),
-            waypoints,
+            waypoints: waypoints.fuse(),
             linear_controller,
             angular_controller,
             lookahead,
+            tolerances,
             state: None,
         }
     }
@@ -87,11 +99,13 @@ struct State {
 }
 
 /// Future returned by [`PathFollow::follow`].
+///
+/// The iterator has to implement [`FusedIterator`] because we use it to check if the path is finished.
 struct PathFollowFuture<
     'a,
-    I: Iterator<Item = Waypoint>,
+    I: Iterator<Item = Waypoint> + FusedIterator,
     M: DrivetrainModel + Arcade,
-    T: TracksPosition + TracksHeading,
+    T: TracksPosition + TracksHeading + TracksVelocity,
 > {
     /// The drivetrain being moved.
     drivetrain: &'a mut Drivetrain<M, T>,
@@ -121,14 +135,22 @@ struct PathFollowFuture<
     /// This is copied directly from [`PathFollow`].
     lookahead: f64,
 
+    /// The tolerances used for settling.
+    ///
+    /// This is copied directly from [`PathFollow`].
+    tolerances: Tolerances,
+
     /// The state of the motion.
     ///
     /// This stores information for use within the future.
     state: Option<State>,
 }
 
-impl<I: Iterator<Item = Waypoint>, M: DrivetrainModel + Arcade, T: TracksPosition + TracksHeading>
-    PathFollowFuture<'_, I, M, T>
+impl<
+    I: Iterator<Item = Waypoint> + FusedIterator,
+    M: DrivetrainModel + Arcade,
+    T: TracksPosition + TracksHeading + TracksVelocity,
+> PathFollowFuture<'_, I, M, T>
 {
     /// returns a heuristic for the total distance left in the motion
     ///
@@ -146,9 +168,9 @@ impl<I: Iterator<Item = Waypoint>, M: DrivetrainModel + Arcade, T: TracksPositio
 }
 
 impl<
-    I: Iterator<Item = Waypoint> + Unpin,
+    I: Iterator<Item = Waypoint> + Unpin + FusedIterator,
     M: DrivetrainModel + Arcade,
-    T: TracksPosition + TracksHeading,
+    T: TracksPosition + TracksHeading + TracksVelocity,
 > Future for PathFollowFuture<'_, I, M, T>
 {
     type Output = ();
@@ -189,9 +211,18 @@ impl<
 
         // find the next point that we have not reached
         while state.current.position.distance(position) <= this.lookahead {
-            // find next waypoint (or exit if we are finished)
+            // find next waypoint (or check settling conditions if there are no more waypoints)
             let Some(new_waypoint) = this.waypoints.next() else {
-                return Poll::Ready(());
+                // if it is settled
+                if this.tolerances.check(
+                    position.distance(state.current.position),
+                    this.drivetrain.tracking.linear_velocity(),
+                ) {
+                    // we are done!
+                    return Poll::Ready(());
+                }
+                // if it is not settled, just exit the loop
+                break;
             };
             // update the distance that is left on the path
             this.path_distance -= state.current.position.distance(new_waypoint.position);
