@@ -274,7 +274,7 @@ impl<
         drop(
             this.drivetrain
                 .model
-                .drive_arcade(f64::max(throttle, throttle_limit), steer),
+                .drive_arcade(f64::min(throttle, throttle_limit), steer),
         );
 
         // wake ourselves once so that we can poll the timer (sleep)
