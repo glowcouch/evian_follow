@@ -186,7 +186,7 @@ impl<
     fn throttle_limit(&self, error: Angle) -> f64 {
         f64::max(
             0.,
-            1. - (error.abs().as_radians() / self.throttle_angle.as_radians()),
+            1. - (error.wrapped_half().abs().as_radians() / self.throttle_angle.as_radians()),
         )
     }
 }
