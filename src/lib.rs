@@ -34,6 +34,13 @@ pub struct PathFollow {
     /// result in higher accuracy, but can cause more oscilation.
     pub lookahead: f64,
 
+    /// Throttle angle.
+    ///
+    /// When the angular error is greater than this angle the robot will not move forwards. Within
+    /// this angle, the throttle will be scaled linearly - max speed being when the error is
+    /// closest to 0.
+    pub throttle_angle: Angle,
+
     /// The tolerances used for settling.
     ///
     /// The error is the distance to the last point.
@@ -43,6 +50,8 @@ pub struct PathFollow {
 
 impl PathFollow {
     /// Follow a set of waypoints.
+    ///
+    /// Important note: the velocity of waypoints is ignored.
     pub fn follow<
         M: Arcade,
         I: IntoIterator<Item = Waypoint>,
@@ -59,6 +68,7 @@ impl PathFollow {
             linear_controller,
             angular_controller,
             lookahead,
+            throttle_angle,
             tolerances,
         } = self.clone();
         let waypoints = waypoints.into_iter();
@@ -75,6 +85,7 @@ impl PathFollow {
             linear_controller,
             angular_controller,
             lookahead,
+            throttle_angle,
             tolerances,
             state: None,
         }
@@ -135,6 +146,11 @@ struct PathFollowFuture<
     /// This is copied directly from [`PathFollow`].
     lookahead: f64,
 
+    /// Throttle angle.
+    ///
+    /// This is copied directly from [`PathFollow`].
+    throttle_angle: Angle,
+
     /// The tolerances used for settling.
     ///
     /// This is copied directly from [`PathFollow`].
@@ -164,6 +180,14 @@ impl<
             .map(|state| state.current.position.distance(position))
             .unwrap_or_default();
         distance_to_current + self.path_distance
+    }
+
+    /// returns the maximum throttle for a given angular error
+    fn throttle_limit(&self, error: Angle) -> f64 {
+        f64::max(
+            0.,
+            1. - (error.abs().as_radians() / self.throttle_angle.as_radians()),
+        )
     }
 }
 
@@ -242,8 +266,7 @@ impl<
             .update(heading, angular_setpoint, dt);
 
         // update linear controller
-        let velocity_limit = state.current.velocity; // have to store this in a variable here
-        // because of lifetimes
+        let throttle_limit = this.throttle_limit(angular_setpoint - heading);
         let linear_setpoint = this.distance_heuristic(position);
         let throttle = this.linear_controller.update(0., linear_setpoint, dt);
 
@@ -251,7 +274,7 @@ impl<
         drop(
             this.drivetrain
                 .model
-                .drive_arcade(f64::max(throttle, velocity_limit), steer),
+                .drive_arcade(f64::max(throttle, throttle_limit), steer),
         );
 
         // wake ourselves once so that we can poll the timer (sleep)
