@@ -243,6 +243,7 @@ impl<
                     this.drivetrain.tracking.linear_velocity(),
                 ) {
                     // we are done!
+                    drop(this.drivetrain.model.drive_arcade(0., 0.));
                     return Poll::Ready(());
                 }
                 // if it is not settled, just exit the loop
