@@ -266,6 +266,9 @@ impl<
             .angular_controller
             .update(heading, angular_setpoint, dt);
 
+        // save this for later because of lifetimes
+        let waypoint_limit = state.current.velocity;
+
         // update linear controller
         let throttle_limit = this.throttle_limit(angular_setpoint - heading);
         let linear_setpoint = this.distance_heuristic(position);
@@ -275,7 +278,7 @@ impl<
         drop(
             this.drivetrain
                 .model
-                .drive_arcade(f64::min(throttle, throttle_limit), steer),
+                .drive_arcade(throttle.min(throttle_limit).min(waypoint_limit), steer),
         );
 
         // wake ourselves once so that we can poll the timer (sleep)
