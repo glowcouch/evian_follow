@@ -181,14 +181,6 @@ impl<
             .unwrap_or_default();
         distance_to_current + self.path_distance
     }
-
-    /// returns the maximum throttle for a given angular error
-    fn throttle_limit(&self, error: Angle) -> f64 {
-        f64::max(
-            0.,
-            1. - (error.wrapped_half().abs().as_radians() / self.throttle_angle.as_radians()),
-        )
-    }
 }
 
 impl<
@@ -270,15 +262,15 @@ impl<
         let waypoint_limit = state.current.velocity;
 
         // update linear controller
-        let throttle_limit = this.throttle_limit(angular_setpoint - heading);
+        let throttle_scaling = (angular_setpoint - heading).wrapped_half().cos().abs(); // scale throttle based on the cos of the angular error
         let linear_setpoint = this.distance_heuristic(position);
-        let throttle = this.linear_controller.update(0., linear_setpoint, dt);
+        let throttle = this.linear_controller.update(-linear_setpoint, 0., dt) * throttle_scaling;
 
         // drive the robot
         drop(
             this.drivetrain
                 .model
-                .drive_arcade(throttle.min(throttle_limit).min(waypoint_limit), steer),
+                .drive_arcade(throttle.min(waypoint_limit), steer),
         );
 
         // wake ourselves once so that we can poll the timer (sleep)
