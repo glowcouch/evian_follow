@@ -5,7 +5,7 @@ use core::{iter::FusedIterator, pin::Pin, task::Poll, time::Duration};
 use std::time::Instant;
 
 use evian::{
-    control::loops::{AngularPid, Feedback, Pid},
+    control::loops::{Feedback, Pid},
     drivetrain::model::DrivetrainModel,
     math::{Angle, Vec2},
     motion::pursuit::Waypoint,
@@ -23,10 +23,12 @@ pub struct PathFollow {
     /// This controls the robot's speed throughout the motion.
     pub linear_controller: Pid,
 
-    /// Angular feedback controller.
+    /// Cross-track feedback controller.
     ///
     /// This controls the robot's heading throughout the motion.
-    pub angular_controller: AngularPid,
+    /// Cross-track error is the robot's projected distance from the target point if it continued
+    /// at this heading.
+    pub lateral_controller: Pid,
 
     /// Lookahead radius.
     ///
@@ -66,7 +68,7 @@ impl PathFollow {
     {
         let Self {
             linear_controller,
-            angular_controller,
+            lateral_controller,
             lookahead,
             throttle_angle,
             tolerances,
@@ -83,7 +85,7 @@ impl PathFollow {
                 .sum(),
             waypoints: waypoints.fuse(),
             linear_controller,
-            angular_controller,
+            lateral_controller,
             lookahead,
             throttle_angle,
             tolerances,
@@ -136,10 +138,10 @@ struct PathFollowFuture<
     /// This is copied directly from [`PathFollow`].
     linear_controller: Pid,
 
-    /// Angular feedback controller.
+    /// Cross-track feedback controller.
     ///
     /// This is copied directly from [`PathFollow`].
-    angular_controller: AngularPid,
+    lateral_controller: Pid,
 
     /// The lookahead radius.
     ///
@@ -252,19 +254,26 @@ impl<
         // update state
         state.prev_time = Instant::now();
 
-        // update angular controller
-        let angular_setpoint = Angle::from_radians((state.current.position - position).angle());
-        let steer = this
-            .angular_controller
-            .update(heading, angular_setpoint, dt);
-
-        // save this for later because of lifetimes
+        // save this for later because of lifetimes :/
         let waypoint_limit = state.current.velocity;
+
+        // target in local coordinates (0,0 is the robot center)
+        let local_target = state.current.position - position;
+
+        // find linear error
+        let linear_error = this.distance_heuristic(position);
+
+        // find cross-track error
+        let angular_setpoint = Angle::from_radians(local_target.angle());
+        let angular_error = (heading - angular_setpoint).wrapped_half();
+        let projected_cte = linear_error * angular_error.sin();
+
+        // update angular controller
+        let steer = this.lateral_controller.update(projected_cte, 0., dt);
 
         // update linear controller
         let throttle_scaling = (angular_setpoint - heading).wrapped_half().cos().abs(); // scale throttle based on the cos of the angular error
-        let linear_setpoint = this.distance_heuristic(position);
-        let throttle = this.linear_controller.update(-linear_setpoint, 0., dt) * throttle_scaling;
+        let throttle = this.linear_controller.update(-linear_error, 0., dt) * throttle_scaling;
 
         // drive the robot
         drop(
