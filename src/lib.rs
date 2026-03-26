@@ -260,16 +260,16 @@ impl<
         // target in local coordinates (0,0 is the robot center)
         let local_target = state.current.position - position;
 
-        // find linear error
-        let linear_error = this.distance_heuristic(position);
-
         // find cross-track error
         let angular_setpoint = Angle::from_radians(local_target.angle());
         let angular_error = (heading - angular_setpoint).wrapped_half();
-        let projected_cte = linear_error * angular_error.sin();
+        let projected_cte = local_target.length() * angular_error.sin();
 
         // update angular controller
         let steer = this.lateral_controller.update(projected_cte, 0., dt);
+
+        // find linear error
+        let linear_error = this.distance_heuristic(position);
 
         // update linear controller
         let throttle_scaling = (angular_setpoint - heading).wrapped_half().cos().abs(); // scale throttle based on the cos of the angular error
