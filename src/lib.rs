@@ -276,11 +276,10 @@ impl<
         let throttle = this.linear_controller.update(-linear_error, 0., dt) * throttle_scaling;
 
         // drive the robot
-        drop(
-            this.drivetrain
-                .model
-                .drive_arcade(throttle.min(waypoint_limit), steer),
-        );
+        drop(this.drivetrain.model.drive_arcade(
+            throttle.min(waypoint_limit).clamp(-1., 1.),
+            steer.clamp(-1., 1.),
+        ));
 
         // wake ourselves once so that we can poll the timer (sleep)
         //
