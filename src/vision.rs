@@ -3,8 +3,9 @@
 use std::time::Instant;
 
 use evian::{
-    control::loops::{Feedback, Pid},
+    control::loops::{AngularPid, Feedback},
     drivetrain::model::Arcade,
+    math::Angle,
     prelude::{Drivetrain, Tolerances, TracksHeading, TracksPosition, TracksVelocity},
 };
 use vexide::{
@@ -18,8 +19,8 @@ use vexide::{
 pub struct VisionTrack {
     /// The angular controller used for turning.
     ///
-    /// Takes the object's distance from the center of the vision sensor as input.
-    pub controller: Pid,
+    /// Takes the object's approximate TODO: finish this
+    pub controller: AngularPid,
 
     /// Tolerances used to determine when the robot has finished turning.
     ///
@@ -78,16 +79,12 @@ impl VisionTrack {
                     .filter(|c| c.id == object_id)
                     .max_by_key(|c| c.width * c.height)
                 {
-                    // find the center of that object (horizontally)
-                    let center = f64::from(biggest.width) / 2. + f64::from(biggest.position.x);
-
-                    // where we want the object to be
-                    let target = f64::from(AiVisionSensor::HORIZONTAL_RESOLUTION) / 2.;
+                    let error = color_angle(&biggest).wrapped_half();
 
                     // update controller
                     let dt = prev_time.elapsed();
                     prev_time = Instant::now();
-                    let steer = controller.update(center, target, dt);
+                    let steer = controller.update(-error, Angle::ZERO, dt);
 
                     // drive robot
                     drop(drivetrain.model.drive_arcade(0., steer));
@@ -95,4 +92,24 @@ impl VisionTrack {
             }
         }
     }
+}
+
+/// Returns the angle (from the center of the screen) of a color object.
+fn color_angle(object: &Color) -> Angle {
+    // find the center of that object (horizontally)
+    let center = f64::from(object.width) / 2. + f64::from(object.position.x);
+
+    // the center of the screen
+    let target = f64::from(AiVisionSensor::HORIZONTAL_RESOLUTION) / 2.;
+
+    // the distance in pixels
+    let distance = center - target;
+
+    // convert to angle
+    Angle::from_degrees(
+        // negate the answer so that negative values mean the object is to the right and positive
+        // values mean the object is to the left
+        -(f64::from(AiVisionSensor::HORIZONTAL_FOV) * distance)
+            / f64::from(AiVisionSensor::HORIZONTAL_RESOLUTION),
+    )
 }
