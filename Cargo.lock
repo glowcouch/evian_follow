@@ -163,6 +163,7 @@ dependencies = [
  "simple_moving_average",
  "tracing",
  "vexide",
+ "vexide-motorgroup",
 ]
 
 [[package]]
@@ -404,6 +405,15 @@ dependencies = [
  "snafu",
  "vex-sdk",
  "vexide-core",
+]
+
+[[package]]
+name = "vexide-motorgroup"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d8941c7f626a6b9d4e4aa3dac9e7149fad3e725647941ad52146ec8923e1a61"
+dependencies = [
+ "vexide",
 ]
 
 [[package]]
