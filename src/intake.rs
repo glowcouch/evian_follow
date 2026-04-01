@@ -47,7 +47,8 @@ pub struct IntakeEfficiency {
     /// The rate of change above which the intake is considered triggered.
     pub threshold: f64,
 
-    /// The EMA smoothness factor
+    /// The EMA smoothness factor (0,1)
+    /// Smaller values smooth the measurements more.
     pub smootheness: f64,
 }
 
