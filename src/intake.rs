@@ -3,8 +3,10 @@
 //! This is typically used for detecting when a game object has been intaked.
 
 use core::time::Duration;
-use vexide::prelude::{Motor, sleep};
 
+use crate::util::differentiate::Differentiate;
+use crate::util::ema::Ema;
+use vexide::prelude::{Motor, sleep};
 use vexide::smart::SmartDevice;
 
 /// Things that can measure their efficiency
@@ -42,7 +44,7 @@ impl Efficiency for Motor {
 
 /// Controller that can wait for motor efficiency to drop.
 pub struct IntakeEfficiency {
-    /// The efficiency threshold, above which the intake is considered triggered.
+    /// The rate of change above which the intake is considered triggered.
     pub threshold: f64,
 
     /// The EMA smoothness factor
@@ -56,13 +58,17 @@ impl IntakeEfficiency {
     ///
     /// Will return [`Err`] if measurement of efficiency fails.
     pub async fn wait_above<E: Efficiency>(&self, efficiency: &E) -> Result<(), E::Err> {
-        let mut ema = crate::util::ema::Ema::new(self.smootheness);
+        let mut ema = Ema::new(self.smootheness);
+        let mut diff = Differentiate::new();
 
         loop {
             // exit early if measurement fails because we don't want to get stuck in a loop
             let next = ema.next(efficiency.efficiency()?);
 
-            if next > self.threshold {
+            // if there isn't enough samples to calculate the rate, wait for the next update
+            if let Some(rate) = diff.next(next)
+                && rate > self.threshold
+            {
                 return Ok(());
             }
 
@@ -76,13 +82,17 @@ impl IntakeEfficiency {
     ///
     /// Will return [`Err`] if measurement of efficiency fails.
     pub async fn wait_below<E: Efficiency>(&self, efficiency: &E) -> Result<(), E::Err> {
-        let mut ema = crate::util::ema::Ema::new(self.smootheness);
+        let mut ema = Ema::new(self.smootheness);
+        let mut diff = Differentiate::new();
 
         loop {
             // exit early if measurement fails because we don't want to get stuck in a loop
             let next = ema.next(efficiency.efficiency()?);
 
-            if next < self.threshold {
+            // if there isn't enough samples to calculate the rate, wait for the next update
+            if let Some(rate) = diff.next(next)
+                && rate < self.threshold
+            {
                 return Ok(());
             }
 
