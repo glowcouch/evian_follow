@@ -175,16 +175,20 @@ impl<
             sleep(AiVisionSensor::UPDATE_INTERVAL).await;
 
             // get values
-            let error = sensor.update().unwrap_or_default();
+            let angular_error = sensor.update().unwrap_or_default();
             let dt = prev_time.elapsed();
             prev_time = Instant::now();
 
             // update angular controller
-            let steer = angular_controller.update(error, Angle::ZERO, dt);
+            let steer = angular_controller
+                .update(angular_error, Angle::ZERO, dt)
+                .clamp(-1., 1.);
 
             // update linear controller
-            let throttle =
-                linear_controller.update(drivetrain.tracking.forward_travel(), target_travel, dt);
+            let throttle = linear_controller
+                .update(drivetrain.tracking.forward_travel(), target_travel, dt)
+                .clamp(-1., 1.)
+                * angular_error.cos();
             if linear_tolerances.check(throttle, drivetrain.tracking.linear_velocity()) {
                 break;
             }
