@@ -1,7 +1,8 @@
 //! A controller that turns to face a vision sensor object.
 
-use std::time::Instant;
+use std::{convert::Infallible, time::Instant};
 
+use anyhow::Context;
 use evian::{
     control::loops::Feedback,
     drivetrain::model::Arcade,
@@ -43,33 +44,35 @@ struct VisionSensorAbstraction<'a, const SMA_WINDOW: usize> {
 
 impl<'a, const SMA_WINDOW: usize> VisionSensorAbstraction<'a, SMA_WINDOW> {
     /// Update the vision sensor and get an angle value back.
-    fn update(&mut self) -> Angle {
-        if let Ok(objects) = self.sensor.objects() {
-            // find biggest color object
-            if let Some(biggest) = objects
-                .iter()
-                .filter_map(|o| match *o {
-                    AiVisionObject::Color {
-                        id,
-                        position,
-                        width,
-                        height,
-                    } => Some(Color {
-                        id,
-                        position,
-                        width,
-                        height,
-                    }),
-                    _ => None,
-                })
-                .filter(|c| c.id == self.object_id)
-                .max_by_key(|c| c.width * c.height)
-            {
-                let error = color_angle(&biggest).wrapped_half();
-                self.sma.add_sample(error);
-            }
-        }
-        self.sma.get_average()
+    fn update(&mut self) -> anyhow::Result<Angle> {
+        let objects = self.sensor.objects()?;
+
+        // find biggest color object
+        let biggest = objects
+            .iter()
+            .filter_map(|o| match *o {
+                AiVisionObject::Color {
+                    id,
+                    position,
+                    width,
+                    height,
+                } => Some(Color {
+                    id,
+                    position,
+                    width,
+                    height,
+                }),
+                _ => None,
+            })
+            .filter(|c| c.id == self.object_id)
+            .max_by_key(|c| c.width * c.height)
+            .context("no objects detected")?;
+
+        // calculate new error using sma
+        let error = color_angle(&biggest).wrapped_half();
+        self.sma.add_sample(error);
+
+        Ok(self.sma.get_average())
     }
 
     /// Create a new instance.
@@ -100,6 +103,10 @@ impl<F: Feedback<State = Angle, Signal = f64> + Clone> VisionTrack<F> {
     /// Point to face a vision sensor object.
     ///
     /// `object_id` is the id of the color to track (colors are the only ones supported currently).
+    ///
+    /// # Errors
+    ///
+    /// Will return an error if no object is detected by the vision sensor (or it is disconnected).
     pub async fn turn_to_object<M: Arcade, T: TracksPosition + TracksHeading + TracksVelocity>(
         &self,
         drivetrain: &mut Drivetrain<M, T>,
@@ -114,7 +121,7 @@ impl<F: Feedback<State = Angle, Signal = f64> + Clone> VisionTrack<F> {
         loop {
             sleep(AiVisionSensor::UPDATE_INTERVAL).await;
 
-            let error = sensor.update();
+            let error = sensor.update().unwrap_or_default();
 
             // update controller
             let dt = prev_time.elapsed();
