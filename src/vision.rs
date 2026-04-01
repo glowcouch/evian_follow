@@ -19,7 +19,7 @@ use vexide::{
 pub struct VisionTrack<F: Feedback<State = Angle, Signal = f64>> {
     /// The angular controller used for turning.
     ///
-    /// Takes the object's approximate TODO: finish this
+    /// Takes the robot's approximate heading relative to the object.
     pub controller: F,
 
     /// Tolerances used to determine when the robot has finished turning.
