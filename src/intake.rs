@@ -53,7 +53,7 @@ impl<const SMA_WINDOW: usize> IntakeEfficiency<SMA_WINDOW> {
     /// # Errors
     ///
     /// Will return [`Err`] if measurement of efficiency fails.
-    pub async fn wait<E: Efficiency>(&self, efficiency: &E) -> Result<(), E::Err> {
+    pub async fn wait_above<E: Efficiency>(&self, efficiency: &E) -> Result<(), E::Err> {
         let mut sma: SingleSumSMA<f64, f64, SMA_WINDOW> = SingleSumSMA::new();
 
         loop {
@@ -61,6 +61,26 @@ impl<const SMA_WINDOW: usize> IntakeEfficiency<SMA_WINDOW> {
             sma.add_sample(efficiency.efficiency()?);
 
             if sma.get_average() > self.threshold {
+                return Ok(());
+            }
+
+            sleep(E::UPDATE_INTERVAL).await;
+        }
+    }
+
+    /// Will return [`core::task::Poll::Pending`] when the efficiency is below the threshold.
+    ///
+    /// # Errors
+    ///
+    /// Will return [`Err`] if measurement of efficiency fails.
+    pub async fn wait_below<E: Efficiency>(&self, efficiency: &E) -> Result<(), E::Err> {
+        let mut sma: SingleSumSMA<f64, f64, SMA_WINDOW> = SingleSumSMA::new();
+
+        loop {
+            // exit early if measurement fails because we don't want to get stuck in a loop
+            sma.add_sample(efficiency.efficiency()?);
+
+            if sma.get_average() < self.threshold {
                 return Ok(());
             }
 
