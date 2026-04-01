@@ -3,7 +3,6 @@
 //! This is typically used for detecting when a game object has been intaked.
 
 use core::time::Duration;
-use simple_moving_average::{SMA, SingleSumSMA};
 use vexide::prelude::{Motor, sleep};
 
 use vexide::smart::SmartDevice;
@@ -42,25 +41,28 @@ impl Efficiency for Motor {
 }
 
 /// Controller that can wait for motor efficiency to drop.
-pub struct IntakeEfficiency<const SMA_WINDOW: usize> {
+pub struct IntakeEfficiency {
     /// The efficiency threshold, above which the intake is considered triggered.
     pub threshold: f64,
+
+    /// The EMA smoothness factor
+    pub smootheness: f64,
 }
 
-impl<const SMA_WINDOW: usize> IntakeEfficiency<SMA_WINDOW> {
+impl IntakeEfficiency {
     /// Will return [`core::task::Poll::Pending`] when the efficiency is above the threshold.
     ///
     /// # Errors
     ///
     /// Will return [`Err`] if measurement of efficiency fails.
     pub async fn wait_above<E: Efficiency>(&self, efficiency: &E) -> Result<(), E::Err> {
-        let mut sma: SingleSumSMA<f64, f64, SMA_WINDOW> = SingleSumSMA::new();
+        let mut ema = crate::util::ema::Ema::new(self.smootheness);
 
         loop {
             // exit early if measurement fails because we don't want to get stuck in a loop
-            sma.add_sample(efficiency.efficiency()?);
+            let next = ema.next(efficiency.efficiency()?);
 
-            if sma.get_average() > self.threshold {
+            if next > self.threshold {
                 return Ok(());
             }
 
@@ -74,13 +76,13 @@ impl<const SMA_WINDOW: usize> IntakeEfficiency<SMA_WINDOW> {
     ///
     /// Will return [`Err`] if measurement of efficiency fails.
     pub async fn wait_below<E: Efficiency>(&self, efficiency: &E) -> Result<(), E::Err> {
-        let mut sma: SingleSumSMA<f64, f64, SMA_WINDOW> = SingleSumSMA::new();
+        let mut ema = crate::util::ema::Ema::new(self.smootheness);
 
         loop {
             // exit early if measurement fails because we don't want to get stuck in a loop
-            sma.add_sample(efficiency.efficiency()?);
+            let next = ema.next(efficiency.efficiency()?);
 
-            if sma.get_average() < self.threshold {
+            if next < self.threshold {
                 return Ok(());
             }
 
