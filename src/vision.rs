@@ -1,15 +1,13 @@
 //! A controller that turns to face a vision sensor object.
 
-use std::{convert::Infallible, time::Instant};
+use std::time::Instant;
 
 use anyhow::Context;
 use evian::{
     control::loops::Feedback,
     drivetrain::model::Arcade,
     math::Angle,
-    prelude::{
-        Drivetrain, Tolerances, TracksForwardTravel, TracksHeading, TracksPosition, TracksVelocity,
-    },
+    prelude::{Drivetrain, Tolerances, TracksForwardTravel, TracksVelocity},
     tracking::Tracking,
 };
 use simple_moving_average::SMA;
@@ -17,7 +15,7 @@ use simple_moving_average::SingleSumSMA;
 use vexide::{
     math::Point2,
     prelude::AiVisionSensor,
-    smart::{SmartDevice, ai_vision::AiVisionObject, vision},
+    smart::{SmartDevice, ai_vision::AiVisionObject},
     time::sleep,
 };
 
@@ -132,6 +130,7 @@ impl<
         let mut prev_time = Instant::now();
         let mut sensor = VisionSensorAbstraction::<3>::new(vision_sensor, object_id);
 
+        // TODO: add settling to this
         loop {
             sleep(AiVisionSensor::UPDATE_INTERVAL).await;
 

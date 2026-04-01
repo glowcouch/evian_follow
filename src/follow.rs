@@ -33,13 +33,6 @@ pub struct PathFollow {
     /// result in higher accuracy, but can cause more oscilation.
     pub lookahead: f64,
 
-    /// Throttle angle.
-    ///
-    /// When the angular error is greater than this angle the robot will not move forwards. Within
-    /// this angle, the throttle will be scaled linearly - max speed being when the error is
-    /// closest to 0.
-    pub throttle_angle: Angle,
-
     /// The tolerances used for settling.
     ///
     /// The error is the distance to the last point.
@@ -67,7 +60,6 @@ impl PathFollow {
             linear_controller,
             angular_controller,
             lookahead,
-            throttle_angle,
             tolerances,
         } = self.clone();
         let waypoints = waypoints.into_iter();
@@ -84,7 +76,6 @@ impl PathFollow {
             linear_controller,
             angular_controller,
             lookahead,
-            throttle_angle,
             tolerances,
             state: None,
         }
@@ -144,11 +135,6 @@ struct PathFollowFuture<
     ///
     /// This is copied directly from [`PathFollow`].
     lookahead: f64,
-
-    /// Throttle angle.
-    ///
-    /// This is copied directly from [`PathFollow`].
-    throttle_angle: Angle,
 
     /// The tolerances used for settling.
     ///
