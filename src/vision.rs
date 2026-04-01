@@ -7,7 +7,10 @@ use evian::{
     control::loops::Feedback,
     drivetrain::model::Arcade,
     math::Angle,
-    prelude::{Drivetrain, Tolerances, TracksHeading, TracksPosition, TracksVelocity},
+    prelude::{
+        Drivetrain, Tolerances, TracksForwardTravel, TracksHeading, TracksPosition, TracksVelocity,
+    },
+    tracking::Tracking,
 };
 use simple_moving_average::SMA;
 use simple_moving_average::SingleSumSMA;
@@ -86,20 +89,31 @@ impl<'a, const SMA_WINDOW: usize> VisionSensorAbstraction<'a, SMA_WINDOW> {
 }
 
 /// A controller that turns to face a vision sensor object.
-pub struct VisionTrack<F: Feedback<State = Angle, Signal = f64>> {
+pub struct VisionTrack<
+    FA: Feedback<State = Angle, Signal = f64>,
+    FL: Feedback<State = f64, Signal = f64>,
+> {
     /// The angular controller used for turning.
     ///
     /// Takes the robot's approximate heading relative to the object.
-    pub controller: F,
+    pub angular_controller: FA,
 
-    /// Tolerances used to determine when the robot has finished turning.
+    /// The linear controller used for driving.
     ///
-    /// Takes distance in pixels as input.
-    //  It might be better to scale distance with the width of the object or something.
-    pub tolerances: Tolerances,
+    /// Takes the robot's distance from the target.
+    pub linear_controller: FL,
+
+    /// Tolerances used to determine when the robot has finished driving.
+    ///
+    /// Takes the robot's distance from the target.
+    pub linear_tolerances: Tolerances,
 }
 
-impl<F: Feedback<State = Angle, Signal = f64> + Clone> VisionTrack<F> {
+impl<
+    FA: Feedback<State = Angle, Signal = f64> + Clone,
+    FL: Feedback<State = f64, Signal = f64> + Clone,
+> VisionTrack<FA, FL>
+{
     /// Point to face a vision sensor object.
     ///
     /// `object_id` is the id of the color to track (colors are the only ones supported currently).
@@ -107,14 +121,14 @@ impl<F: Feedback<State = Angle, Signal = f64> + Clone> VisionTrack<F> {
     /// # Errors
     ///
     /// Will return an error if no object is detected by the vision sensor (or it is disconnected).
-    pub async fn turn_to_object<M: Arcade, T: TracksPosition + TracksHeading + TracksVelocity>(
+    pub async fn turn_to_object<M: Arcade, T: Tracking>(
         &self,
         drivetrain: &mut Drivetrain<M, T>,
         vision_sensor: &AiVisionSensor,
         object_id: u8,
     ) {
         // state
-        let mut controller = self.controller.clone();
+        let mut controller = self.angular_controller.clone();
         let mut prev_time = Instant::now();
         let mut sensor = VisionSensorAbstraction::<3>::new(vision_sensor, object_id);
 
@@ -130,6 +144,53 @@ impl<F: Feedback<State = Angle, Signal = f64> + Clone> VisionTrack<F> {
 
             // drive robot
             drop(drivetrain.model.drive_arcade(0., steer));
+        }
+    }
+
+    /// Point to face a vision sensor object while driving some distance.
+    ///
+    /// `object_id` is the id of the color to track (colors are the only ones supported currently).
+    ///
+    /// # Errors
+    ///
+    /// Will return an error if no object is detected by the vision sensor (or it is disconnected).
+    pub async fn drive_towards_object<M: Arcade, T: TracksForwardTravel + TracksVelocity>(
+        &self,
+        drivetrain: &mut Drivetrain<M, T>,
+        vision_sensor: &AiVisionSensor,
+        object_id: u8,
+        distance: f64,
+    ) {
+        // state
+        let mut angular_controller = self.angular_controller.clone();
+        let mut linear_controller = self.linear_controller.clone();
+        let mut linear_tolerances = self.linear_tolerances;
+        let mut prev_time = Instant::now();
+        let mut sensor = VisionSensorAbstraction::<3>::new(vision_sensor, object_id);
+
+        // initial state
+        let target_travel = drivetrain.tracking.forward_travel() + distance;
+
+        loop {
+            sleep(AiVisionSensor::UPDATE_INTERVAL).await;
+
+            // get values
+            let error = sensor.update().unwrap_or_default();
+            let dt = prev_time.elapsed();
+            prev_time = Instant::now();
+
+            // update angular controller
+            let steer = angular_controller.update(error, Angle::ZERO, dt);
+
+            // update linear controller
+            let throttle =
+                linear_controller.update(drivetrain.tracking.forward_travel(), target_travel, dt);
+            if linear_tolerances.check(throttle, drivetrain.tracking.linear_velocity()) {
+                break;
+            }
+
+            // drive robot
+            drop(drivetrain.model.drive_arcade(throttle, steer));
         }
     }
 }
