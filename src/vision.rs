@@ -16,11 +16,11 @@ use vexide::{
 };
 
 /// A controller that turns to face a vision sensor object.
-pub struct VisionTrack {
+pub struct VisionTrack<F: Feedback<State = Angle, Signal = f64>> {
     /// The angular controller used for turning.
     ///
     /// Takes the object's approximate TODO: finish this
-    pub controller: AngularPid,
+    pub controller: F,
 
     /// Tolerances used to determine when the robot has finished turning.
     ///
@@ -41,7 +41,7 @@ struct Color {
     height: u16,
 }
 
-impl VisionTrack {
+impl<F: Feedback<State = Angle, Signal = f64> + Clone> VisionTrack<F> {
     /// Point to face a vision sensor object.
     ///
     /// `object_id` is the id of the color to track (colors are the only ones supported currently).
@@ -52,7 +52,7 @@ impl VisionTrack {
         object_id: u8,
     ) {
         // state
-        let mut controller = self.controller;
+        let mut controller = self.controller.clone();
         let mut prev_time = Instant::now();
 
         loop {
