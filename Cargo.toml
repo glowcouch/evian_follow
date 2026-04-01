@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 evian = { git = "https://github.com/vexide/evian.git" }
 vexide = "0.8.0"
+simple_moving_average = "1.0.2"
 
 [lints.clippy]
 # pedantic lints

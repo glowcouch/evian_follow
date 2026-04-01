@@ -8,12 +8,79 @@ use evian::{
     math::Angle,
     prelude::{Drivetrain, Tolerances, TracksHeading, TracksPosition, TracksVelocity},
 };
+use simple_moving_average::SMA;
+use simple_moving_average::SingleSumSMA;
 use vexide::{
     math::Point2,
     prelude::AiVisionSensor,
-    smart::{SmartDevice, ai_vision::AiVisionObject},
+    smart::{SmartDevice, ai_vision::AiVisionObject, vision},
     time::sleep,
 };
+
+/// Wrapper around [`AiVisionObject::Color`].
+struct Color {
+    #[allow(clippy::missing_docs_in_private_items)]
+    id: u8,
+    #[allow(clippy::missing_docs_in_private_items)]
+    position: Point2<u16>,
+    #[allow(clippy::missing_docs_in_private_items)]
+    width: u16,
+    #[allow(clippy::missing_docs_in_private_items)]
+    height: u16,
+}
+
+/// Abstraction over vision sensor for better tracking.
+///
+/// `SMA` is the size of the simple moving average window
+struct VisionSensorAbstraction<'a, const SMA_WINDOW: usize> {
+    /// The vision sensor
+    sensor: &'a AiVisionSensor,
+    /// The id of the color object we are tracking.
+    object_id: u8,
+    /// SMA used to average the angle.
+    sma: SingleSumSMA<Angle, f64, SMA_WINDOW>,
+}
+
+impl<'a, const SMA_WINDOW: usize> VisionSensorAbstraction<'a, SMA_WINDOW> {
+    /// Update the vision sensor and get an angle value back.
+    fn update(&mut self) -> Angle {
+        if let Ok(objects) = self.sensor.objects() {
+            // find biggest color object
+            if let Some(biggest) = objects
+                .iter()
+                .filter_map(|o| match *o {
+                    AiVisionObject::Color {
+                        id,
+                        position,
+                        width,
+                        height,
+                    } => Some(Color {
+                        id,
+                        position,
+                        width,
+                        height,
+                    }),
+                    _ => None,
+                })
+                .filter(|c| c.id == self.object_id)
+                .max_by_key(|c| c.width * c.height)
+            {
+                let error = color_angle(&biggest).wrapped_half();
+                self.sma.add_sample(error);
+            }
+        }
+        self.sma.get_average()
+    }
+
+    /// Create a new instance.
+    fn new(sensor: &'a AiVisionSensor, object_id: u8) -> Self {
+        Self {
+            sensor,
+            object_id,
+            sma: SingleSumSMA::from_zero(Angle::ZERO),
+        }
+    }
+}
 
 /// A controller that turns to face a vision sensor object.
 pub struct VisionTrack<F: Feedback<State = Angle, Signal = f64>> {
@@ -29,18 +96,6 @@ pub struct VisionTrack<F: Feedback<State = Angle, Signal = f64>> {
     pub tolerances: Tolerances,
 }
 
-/// Wrapper around [`AiVisionObject::Color`].
-struct Color {
-    #[allow(clippy::missing_docs_in_private_items)]
-    id: u8,
-    #[allow(clippy::missing_docs_in_private_items)]
-    position: Point2<u16>,
-    #[allow(clippy::missing_docs_in_private_items)]
-    width: u16,
-    #[allow(clippy::missing_docs_in_private_items)]
-    height: u16,
-}
-
 impl<F: Feedback<State = Angle, Signal = f64> + Clone> VisionTrack<F> {
     /// Point to face a vision sensor object.
     ///
@@ -54,52 +109,20 @@ impl<F: Feedback<State = Angle, Signal = f64> + Clone> VisionTrack<F> {
         // state
         let mut controller = self.controller.clone();
         let mut prev_time = Instant::now();
-        let mut samples = Vec::new(); // use SMA for error
-        let max_samples: usize = 3;
+        let mut sensor = VisionSensorAbstraction::<3>::new(vision_sensor, object_id);
 
         loop {
             sleep(AiVisionSensor::UPDATE_INTERVAL).await;
 
-            if let Ok(objects) = vision_sensor.objects() {
-                // find biggest color object
-                if let Some(biggest) = objects
-                    .iter()
-                    .filter_map(|o| match *o {
-                        AiVisionObject::Color {
-                            id,
-                            position,
-                            width,
-                            height,
-                        } => Some(Color {
-                            id,
-                            position,
-                            width,
-                            height,
-                        }),
-                        _ => None,
-                    })
-                    .filter(|c| c.id == object_id)
-                    .max_by_key(|c| c.width * c.height)
-                {
-                    let error = color_angle(&biggest).wrapped_half();
-                    samples.push(error);
-                    if samples.len() > max_samples {
-                        samples.remove(0);
-                    }
+            let error = sensor.update();
 
-                    #[allow(clippy::cast_precision_loss)]
-                    let average_error =
-                        samples.iter().fold(Angle::ZERO, |a, b| a + *b) / samples.len() as f64;
+            // update controller
+            let dt = prev_time.elapsed();
+            prev_time = Instant::now();
+            let steer = controller.update(error, Angle::ZERO, dt);
 
-                    // update controller
-                    let dt = prev_time.elapsed();
-                    prev_time = Instant::now();
-                    let steer = controller.update(average_error, Angle::ZERO, dt);
-
-                    // drive robot
-                    drop(drivetrain.model.drive_arcade(0., steer));
-                }
-            }
+            // drive robot
+            drop(drivetrain.model.drive_arcade(0., steer));
         }
     }
 }
