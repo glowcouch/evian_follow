@@ -14,8 +14,8 @@ impl Differentiate {
 
     /// Get the next value
     pub fn next(&mut self, value: f64) -> Option<f64> {
-        let next = value - self.prev?;
+        let next = self.prev.map(|prev| value - prev);
         self.prev = Some(value);
-        Some(next)
+        next
     }
 }
