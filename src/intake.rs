@@ -4,7 +4,7 @@
 
 use core::time::Duration;
 use simple_moving_average::{SMA, SingleSumSMA};
-use vexide::prelude::sleep;
+use vexide::prelude::{Motor, sleep};
 
 use vexide::smart::SmartDevice;
 
@@ -21,17 +21,17 @@ pub trait Efficiency {
     fn efficiency(&self) -> Result<f64, Self::Err>;
 }
 
-impl Efficiency for vexide_motorgroup::MotorGroup {
+impl<M: AsRef<[Motor]> + AsMut<[Motor]>> Efficiency for vexide_motorgroup::MotorGroup<M> {
     type Err = vexide_motorgroup::MotorGroupError<vexide::smart::PortError, f64>;
 
-    const UPDATE_INTERVAL: Duration = <vexide::smart::motor::Motor as SmartDevice>::UPDATE_INTERVAL;
+    const UPDATE_INTERVAL: Duration = <Motor as SmartDevice>::UPDATE_INTERVAL;
 
     fn efficiency(&self) -> Result<f64, Self::Err> {
         self.efficiency()
     }
 }
 
-impl Efficiency for vexide::smart::motor::Motor {
+impl Efficiency for Motor {
     type Err = vexide::smart::PortError;
 
     const UPDATE_INTERVAL: Duration = <Self as SmartDevice>::UPDATE_INTERVAL;
