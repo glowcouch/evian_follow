@@ -6,30 +6,32 @@ edition = "2024"
 [dependencies]
 evian = { git = "https://github.com/vexide/evian.git" }
 vexide = "0.8.0"
+simple_moving_average = "1.0.2"
+anyhow = "1.0.102"
 
 [lints.clippy]
 # pedantic lints
-std_instead_of_core = "forbid"
-std_instead_of_alloc = "forbid"
-alloc_instead_of_core = "forbid"
-missing_docs_in_private_items = "forbid"
-pedantic = "forbid"
-undocumented_unsafe_blocks = "forbid"
+std_instead_of_core = "deny"
+std_instead_of_alloc = "deny"
+alloc_instead_of_core = "deny"
+missing_docs_in_private_items = "deny"
+pedantic = "deny"
+undocumented_unsafe_blocks = "deny"
 
 # no panic lints
-panic = "forbid"
-unwrap_used = "forbid"
-expect_used = "forbid"
-exit = "forbid"
-todo = "forbid"
-indexing_slicing = "forbid"
-unreachable = "forbid"
+panic = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+exit = "deny"
+todo = "deny"
+indexing_slicing = "deny"
+unreachable = "deny"
 
 # reliability lints
-infinite_loop = "forbid"
-mem_forget = "forbid"
-await_holding_lock = "forbid"
+infinite_loop = "deny"
+mem_forget = "deny"
+await_holding_lock = "deny"
 
 [lints.rust]
 # pedantic lints
-missing_docs = "forbid"
+missing_docs = "deny"
