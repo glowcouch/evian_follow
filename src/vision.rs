@@ -3,7 +3,7 @@
 use std::time::Instant;
 
 use evian::{
-    control::loops::{AngularPid, Feedback},
+    control::loops::Feedback,
     drivetrain::model::Arcade,
     math::Angle,
     prelude::{Drivetrain, Tolerances, TracksHeading, TracksPosition, TracksVelocity},
@@ -54,6 +54,8 @@ impl<F: Feedback<State = Angle, Signal = f64> + Clone> VisionTrack<F> {
         // state
         let mut controller = self.controller.clone();
         let mut prev_time = Instant::now();
+        let mut samples = Vec::new(); // use SMA for error
+        let max_samples: usize = 3;
 
         loop {
             sleep(AiVisionSensor::UPDATE_INTERVAL).await;
@@ -80,11 +82,19 @@ impl<F: Feedback<State = Angle, Signal = f64> + Clone> VisionTrack<F> {
                     .max_by_key(|c| c.width * c.height)
                 {
                     let error = color_angle(&biggest).wrapped_half();
+                    samples.push(error);
+                    if samples.len() > max_samples {
+                        samples.remove(0);
+                    }
+
+                    #[allow(clippy::cast_precision_loss)]
+                    let average_error =
+                        samples.iter().fold(Angle::ZERO, |a, b| a + *b) / samples.len() as f64;
 
                     // update controller
                     let dt = prev_time.elapsed();
                     prev_time = Instant::now();
-                    let steer = controller.update(-error, Angle::ZERO, dt);
+                    let steer = controller.update(average_error, Angle::ZERO, dt);
 
                     // drive robot
                     drop(drivetrain.model.drive_arcade(0., steer));
