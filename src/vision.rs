@@ -5,7 +5,7 @@ use std::time::Instant;
 use anyhow::Context;
 use evian::{
     control::loops::Feedback,
-    drivetrain::model::Arcade,
+    drivetrain::model::{Arcade, DrivetrainModel},
     math::Angle,
     prelude::{Drivetrain, Tolerances, TracksForwardTravel, TracksVelocity},
     tracking::Tracking,
@@ -159,7 +159,9 @@ impl<
         vision_sensor: &AiVisionSensor,
         object_id: u8,
         distance: f64,
-    ) {
+    ) where
+        <M as DrivetrainModel>::Error: core::fmt::Debug,
+    {
         // state
         let mut angular_controller = self.angular_controller.clone();
         let mut linear_controller = self.linear_controller.clone();
@@ -174,7 +176,10 @@ impl<
             sleep(AiVisionSensor::UPDATE_INTERVAL).await;
 
             // get values
-            let angular_error = sensor.update().unwrap_or_default();
+            let angular_error = sensor
+                .update()
+                .inspect_err(|e| tracing::error!("vision sensor error: {e}"))
+                .unwrap_or_default();
             let dt = prev_time.elapsed();
             prev_time = Instant::now();
 
@@ -189,13 +194,24 @@ impl<
                 .clamp(-1., 1.)
                 * angular_error.cos();
             if linear_tolerances.check(throttle, drivetrain.tracking.linear_velocity()) {
+                tracing::info!("reached target");
                 // stop robot
-                drop(drivetrain.model.drive_arcade(0., 0.));
+                drop(
+                    drivetrain
+                        .model
+                        .drive_arcade(0., 0.)
+                        .inspect_err(|e| tracing::error!("failed to stop robot: {:?}", e)),
+                );
                 break;
             }
 
             // drive robot
-            drop(drivetrain.model.drive_arcade(throttle, steer));
+            drop(
+                drivetrain
+                    .model
+                    .drive_arcade(throttle, steer)
+                    .inspect_err(|e| tracing::error!("failed to drive robot: {:?}", e)),
+            );
         }
     }
 }
