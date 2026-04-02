@@ -70,6 +70,7 @@ impl IntakeEfficiency {
             if let Some(rate) = diff.next(next)
                 && rate > self.threshold
             {
+                tracing::debug!("rate went above {rate}");
                 return Ok(());
             }
 
@@ -94,6 +95,7 @@ impl IntakeEfficiency {
             if let Some(rate) = diff.next(next)
                 && rate < self.threshold
             {
+                tracing::debug!("rate went below {rate}");
                 return Ok(());
             }
 
