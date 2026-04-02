@@ -193,7 +193,10 @@ impl<
                 .update(drivetrain.tracking.forward_travel(), target_travel, dt)
                 .clamp(-1., 1.)
                 * angular_error.cos();
-            if linear_tolerances.check(throttle, drivetrain.tracking.linear_velocity()) {
+
+            // check tolerances
+            let error = target_travel - drivetrain.tracking.forward_travel();
+            if linear_tolerances.check(error, drivetrain.tracking.linear_velocity()) {
                 tracing::info!("reached target");
                 // stop robot
                 drop(
