@@ -134,7 +134,10 @@ impl<
         loop {
             sleep(AiVisionSensor::UPDATE_INTERVAL).await;
 
-            let error = sensor.update().unwrap_or_default();
+            let error = sensor
+                .update()
+                .inspect_err(|e| tracing::error!("vision sensor error: {e}"))
+                .unwrap_or_default();
 
             // update controller
             let dt = prev_time.elapsed();
