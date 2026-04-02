@@ -189,6 +189,8 @@ impl<
                 .clamp(-1., 1.)
                 * angular_error.cos();
             if linear_tolerances.check(throttle, drivetrain.tracking.linear_velocity()) {
+                // stop robot
+                drop(drivetrain.model.drive_arcade(0., 0.));
                 break;
             }
 
