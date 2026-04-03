@@ -102,4 +102,36 @@ impl IntakeEfficiency {
             sleep(E::UPDATE_INTERVAL).await;
         }
     }
+
+    /// Will return a vec of `n` samples from the intake.
+    ///
+    /// This is typically for calibration purposes.
+    ///
+    /// # Errors
+    ///
+    /// Will return [`Err`] if measurement of efficiency fails.
+    pub async fn sample<E: Efficiency>(
+        &self,
+        efficiency: &E,
+        n: usize,
+    ) -> Result<Vec<f64>, E::Err> {
+        let mut vec = Vec::new();
+        let mut ema = Ema::new(self.smootheness);
+        let mut diff = Differentiate::new();
+
+        for _ in 0..n {
+            let next = ema.next(efficiency.efficiency()?);
+
+            // if there isn't enough samples to calculate the rate, wait for the next update
+            if let Some(rate) = diff.next(next) {
+                vec.push(rate);
+            } else {
+                continue;
+            }
+
+            sleep(E::UPDATE_INTERVAL).await;
+        }
+
+        Ok(vec)
+    }
 }
