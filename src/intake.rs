@@ -28,7 +28,7 @@ impl<M: AsRef<[Motor]> + AsMut<[Motor]>> Efficiency for vexide_motorgroup::Motor
     const UPDATE_INTERVAL: Duration = <Motor as SmartDevice>::UPDATE_INTERVAL;
 
     fn efficiency(&self) -> Result<f64, Self::Err> {
-        self.efficiency()
+        self.torque()
     }
 }
 
@@ -38,7 +38,7 @@ impl Efficiency for Motor {
     const UPDATE_INTERVAL: Duration = <Self as SmartDevice>::UPDATE_INTERVAL;
 
     fn efficiency(&self) -> Result<f64, Self::Err> {
-        self.efficiency()
+        self.torque()
     }
 }
 
