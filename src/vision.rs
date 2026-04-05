@@ -45,6 +45,10 @@ struct VisionSensorAbstraction<'a, const SMA_WINDOW: usize> {
 
 impl<'a, const SMA_WINDOW: usize> VisionSensorAbstraction<'a, SMA_WINDOW> {
     /// Update the vision sensor and get an angle value back.
+    ///
+    /// # Errors
+    /// - Will return an error if the vision sensor returns an error.
+    /// - Will return an error if no objects of `object_id` are detected.
     fn update(&mut self) -> anyhow::Result<Angle> {
         let objects = self.sensor.objects()?;
 
@@ -218,6 +222,21 @@ impl<
                     .drive_arcade(throttle, steer)
                     .inspect_err(|e| tracing::error!("failed to drive robot: {:?}", e)),
             );
+        }
+    }
+
+    /// Future will complete once the vision sensor detects no objects (with id `object_id`).
+    ///
+    /// `object_id` is the id of the color to track (colors are the only ones supported currently).
+    ///
+    /// # Errors
+    ///
+    /// The future will also complete if the vision sensor returns an error.
+    pub async fn wait_none(&self, vision_sensor: &AiVisionSensor, object_id: u8) {
+        let mut sensor = VisionSensorAbstraction::<3>::new(vision_sensor, object_id);
+
+        while sensor.update().is_ok() {
+            sleep(AiVisionSensor::UPDATE_INTERVAL).await;
         }
     }
 }
