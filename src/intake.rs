@@ -4,6 +4,8 @@
 //!
 //! "Efficiency" is becoming more and more of a misnomer.
 
+use core::error::Error;
+use core::fmt::Debug;
 use core::time::Duration;
 
 use crate::util::differentiate::Differentiate;
@@ -12,7 +14,10 @@ use vexide::prelude::{Motor, sleep};
 use vexide::smart::SmartDevice;
 
 /// Things that can measure their efficiency
-pub trait Efficiency {
+pub trait Efficiency
+where
+    Self::Err: 'static + Debug,
+{
     /// The error returned by measuring.
     type Err;
 
@@ -56,6 +61,53 @@ impl Efficiency for Motor {
     }
 }
 
+/// Signal processing state for [`IntakeEfficiency`].
+pub struct EfficiencyState<'a, E: Efficiency> {
+    /// The exponential moving average. Used to calculate baseline.
+    ema: Ema,
+
+    /// The differentiation. Used to calculate acceleration.
+    acceleration: Differentiate,
+
+    /// The efficiency measurement device.
+    efficiency: &'a E,
+}
+
+impl<E: Efficiency> EfficiencyState<'_, E> {
+    /// Returns the next rate of change value.
+    ///
+    /// # Errors
+    ///
+    /// Will return [`Err`] if `E::efficiency` fails.
+    pub fn next_rate(&mut self) -> anyhow::Result<f64> {
+        let value = self
+            .efficiency
+            .efficiency()
+            .map_err(|e| anyhow::anyhow!("failed to measure efficiency: {e:?}"))?;
+        let baseline = self.ema.next(value);
+
+        Ok(value - baseline)
+    }
+
+    /// Returns the next acceleration value.
+    ///
+    /// # Errors
+    ///
+    /// Will return [`Err`] if `E::velocity` fails.
+    ///
+    /// Will return [`None`] if there aren't enough samples to calculate the acceleration.
+    pub fn next_acceleration(&mut self) -> anyhow::Result<Option<f64>> {
+        let velocity = self
+            .efficiency
+            .velocity()
+            .map_err(|e| anyhow::anyhow!("failed to measure velocity: {e:?}"))?;
+        let Some(acceleration) = self.acceleration.next(velocity) else {
+            return Ok(None);
+        };
+        Ok(Some(acceleration))
+    }
+}
+
 /// Controller that can wait for motor efficiency to drop.
 pub struct IntakeEfficiency {
     /// The rate of change above which the intake is considered triggered.
@@ -72,32 +124,33 @@ pub struct IntakeEfficiency {
 }
 
 impl IntakeEfficiency {
+    /// Returns a new default state.
+    pub fn state<'a, E: Efficiency>(&self, efficiency: &'a E) -> EfficiencyState<'a, E> {
+        EfficiencyState {
+            ema: Ema::new(self.smootheness),
+            acceleration: Differentiate::new(),
+            efficiency,
+        }
+    }
+
     /// Will return [`core::task::Poll::Pending`] when the efficiency measurement is triggered.
     ///
     /// # Errors
     ///
     /// Will return [`Err`] if measurement of efficiency fails.
-    pub async fn wait_above<E: Efficiency>(&self, efficiency: &E) -> Result<(), E::Err> {
-        let mut ema = Ema::new(self.smootheness);
-        let mut acceleration = Differentiate::new();
+    pub async fn wait_above<E: Efficiency>(&self, efficiency: &E) -> anyhow::Result<()> {
+        let mut state = self.state(efficiency);
 
         loop {
             // exit early if measurement fails because we don't want to get stuck in a loop
-            let value = efficiency.efficiency()?;
-            let velocity = efficiency.velocity()?;
+            let rate = state
+                .next_rate()
+                .map_err(|e| anyhow::anyhow!("failed to measure rate: {e:?}"))?;
+            let accel = state
+                .next_acceleration()
+                .map_err(|e| anyhow::anyhow!("failed to measure acceleration: {e:?}"))?;
 
-            // calculate new smoothed value
-            let smooth = ema.next(value);
-
-            // calculate rate of change between smooth value and new value
-            //
-            // This should have better response times and less false negatives than calculating
-            // the rate of change of the smooothed value.
-            let rate = value - smooth;
-
-            // calculate next derivative measurement, skip to next measurement if not enough
-            // samples are available
-            if let Some(accel) = acceleration.next(velocity)
+            if let Some(accel) = accel
                 && rate > self.rate_threshold
                 && accel < self.accel_threshold
             {
@@ -114,27 +167,19 @@ impl IntakeEfficiency {
     /// # Errors
     ///
     /// Will return [`Err`] if measurement of efficiency fails.
-    pub async fn wait_below<E: Efficiency>(&self, efficiency: &E) -> Result<(), E::Err> {
-        let mut ema = Ema::new(self.smootheness);
-        let mut acceleration = Differentiate::new();
+    pub async fn wait_below<E: Efficiency>(&self, efficiency: &E) -> anyhow::Result<()> {
+        let mut state = self.state(efficiency);
 
         loop {
             // exit early if measurement fails because we don't want to get stuck in a loop
-            let value = efficiency.efficiency()?;
-            let velocity = efficiency.velocity()?;
+            let rate = state
+                .next_rate()
+                .map_err(|e| anyhow::anyhow!("failed to measure rate: {e:?}"))?;
+            let accel = state
+                .next_acceleration()
+                .map_err(|e| anyhow::anyhow!("failed to measure acceleration: {e:?}"))?;
 
-            // calculate new smoothed value
-            let smooth = ema.next(value);
-
-            // calculate rate of change between smooth value and new value
-            //
-            // This should have better response times and less false negatives than calculating
-            // the rate of change of the smooothed value.
-            let rate = value - smooth;
-
-            // calculate next derivative measurement, skip to next measurement if not enough
-            // samples are available
-            if let Some(accel) = acceleration.next(velocity)
+            if let Some(accel) = accel
                 && rate < self.rate_threshold
                 && accel > self.accel_threshold
             {
@@ -144,37 +189,5 @@ impl IntakeEfficiency {
 
             sleep(E::UPDATE_INTERVAL).await;
         }
-    }
-
-    /// Will return a vec of `n` samples from the intake.
-    ///
-    /// This is typically for calibration purposes.
-    ///
-    /// # Errors
-    ///
-    /// Will return [`Err`] if measurement of efficiency fails.
-    pub async fn sample<E: Efficiency>(
-        &self,
-        efficiency: &E,
-        n: usize,
-    ) -> Result<Vec<f64>, E::Err> {
-        let mut vec = Vec::new();
-        let mut ema = Ema::new(self.smootheness);
-        let mut diff = Differentiate::new();
-
-        for _ in 0..n {
-            let next = ema.next(efficiency.efficiency()?);
-
-            // if there isn't enough samples to calculate the rate, wait for the next update
-            if let Some(rate) = diff.next(next) {
-                vec.push(rate);
-            } else {
-                continue;
-            }
-
-            sleep(E::UPDATE_INTERVAL).await;
-        }
-
-        Ok(vec)
     }
 }
