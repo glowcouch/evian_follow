@@ -53,23 +53,28 @@ pub struct IntakeEfficiency {
 }
 
 impl IntakeEfficiency {
-    /// Will return [`core::task::Poll::Pending`] when the efficiency is above the threshold.
+    /// Will return [`core::task::Poll::Pending`] when the efficiency measurement is triggered.
     ///
     /// # Errors
     ///
     /// Will return [`Err`] if measurement of efficiency fails.
     pub async fn wait_above<E: Efficiency>(&self, efficiency: &E) -> Result<(), E::Err> {
         let mut ema = Ema::new(self.smootheness);
-        let mut diff = Differentiate::new();
 
         loop {
             // exit early if measurement fails because we don't want to get stuck in a loop
-            let next = ema.next(efficiency.efficiency()?);
+            let value = efficiency.efficiency()?;
 
-            // if there isn't enough samples to calculate the rate, wait for the next update
-            if let Some(rate) = diff.next(next)
-                && rate > self.threshold
-            {
+            // calculate new smoothed value
+            let smooth = ema.next(value);
+
+            // calculate rate of change between smooth value and new value
+            //
+            // This should have better response times and less false negatives than calculating
+            // the rate of change of the smooothed value.
+            let rate = value - smooth;
+
+            if rate > self.threshold {
                 tracing::debug!("rate went above {rate}");
                 return Ok(());
             }
@@ -78,7 +83,7 @@ impl IntakeEfficiency {
         }
     }
 
-    /// Will return [`core::task::Poll::Pending`] when the efficiency is below the threshold.
+    /// Will return [`core::task::Poll::Pending`] when the efficiency measurement is not triggered.
     ///
     /// # Errors
     ///
