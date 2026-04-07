@@ -66,7 +66,10 @@ pub struct EfficiencyState<'a, E: Efficiency> {
     /// The exponential moving average. Used to calculate baseline.
     ema: Ema,
 
-    /// The differentiation. Used to calculate acceleration.
+    /// Used to calculate rate of ema change.
+    rate: Differentiate,
+
+    /// Used to calculate acceleration.
     acceleration: Differentiate,
 
     /// The efficiency measurement device.
@@ -79,14 +82,13 @@ impl<E: Efficiency> EfficiencyState<'_, E> {
     /// # Errors
     ///
     /// Will return [`Err`] if `E::efficiency` fails.
-    pub fn next_rate(&mut self) -> anyhow::Result<f64> {
+    pub fn next_rate(&mut self) -> anyhow::Result<Option<f64>> {
         let value = self
             .efficiency
             .efficiency()
             .map_err(|e| anyhow::anyhow!("failed to measure efficiency: {e:?}"))?;
-        let baseline = self.ema.next(value);
-
-        Ok(value - baseline)
+        let smoothed = self.ema.next(value);
+        Ok(self.rate.next(smoothed))
     }
 
     /// Returns the next acceleration value.
@@ -128,6 +130,7 @@ impl IntakeEfficiency {
     pub fn state<'a, E: Efficiency>(&self, efficiency: &'a E) -> EfficiencyState<'a, E> {
         EfficiencyState {
             ema: Ema::new(self.smootheness),
+            rate: Differentiate::new(),
             acceleration: Differentiate::new(),
             efficiency,
         }
@@ -151,6 +154,7 @@ impl IntakeEfficiency {
                 .map_err(|e| anyhow::anyhow!("failed to measure acceleration: {e:?}"))?;
 
             if let Some(accel) = accel
+                && let Some(rate) = rate
                 && rate > self.rate_threshold
                 && accel < self.accel_threshold
             {
@@ -180,6 +184,7 @@ impl IntakeEfficiency {
                 .map_err(|e| anyhow::anyhow!("failed to measure acceleration: {e:?}"))?;
 
             if let Some(accel) = accel
+                && let Some(rate) = rate
                 && rate < self.rate_threshold
                 && accel > self.accel_threshold
             {
