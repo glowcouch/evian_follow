@@ -61,7 +61,7 @@ pub struct IntakeEfficiency {
     /// The rate of change above which the intake is considered triggered.
     pub rate_threshold: f64,
 
-    /// The acceleration above which the intake is considered triggered.
+    /// The acceleration below which the intake is considered triggered.
     ///
     /// This is to avoid the issue where the motor has a high torque because it is getting up to speed.
     pub accel_threshold: f64,
@@ -99,7 +99,7 @@ impl IntakeEfficiency {
             // samples are available
             if let Some(accel) = acceleration.next(velocity)
                 && rate > self.rate_threshold
-                && accel > self.accel_threshold
+                && accel < self.accel_threshold
             {
                 tracing::debug!("rate went above {rate}");
                 return Ok(());
@@ -136,7 +136,7 @@ impl IntakeEfficiency {
             // samples are available
             if let Some(accel) = acceleration.next(velocity)
                 && rate < self.rate_threshold
-                && accel < self.accel_threshold
+                && accel > self.accel_threshold
             {
                 tracing::debug!("rate went above {rate}");
                 return Ok(());
