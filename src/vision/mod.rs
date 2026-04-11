@@ -117,6 +117,11 @@ pub struct VisionTrack<
     /// Takes the robot's distance from the target.
     pub linear_tolerances: Tolerances,
 
+    /// Tolerances used to determine when the robot has finished turning.
+    ///
+    /// Takes the robot's angular error in radians.
+    pub angular_tolerances: Tolerances,
+
     /// Vision sensor filter.
     pub filter: F,
 
@@ -138,7 +143,7 @@ impl<
     /// # Errors
     ///
     /// Will return an error if no object is detected by the vision sensor (or it is disconnected).
-    pub async fn turn_to_object<M: Arcade, T: Tracking>(
+    pub async fn turn_to_object<M: Arcade, T: Tracking + TracksVelocity>(
         &self,
         drivetrain: &mut Drivetrain<M, T>,
         vision_sensor: &AiVisionSensor,
@@ -153,8 +158,8 @@ impl<
             self.filter.clone(),
             self.sorter.clone(),
         );
+        let mut angular_tolerances = self.angular_tolerances;
 
-        // TODO: add settling to this
         loop {
             sleep(AiVisionSensor::UPDATE_INTERVAL).await;
 
@@ -162,6 +167,12 @@ impl<
                 .update()
                 .inspect_err(|e| tracing::error!("vision sensor error: {e}"))
                 .unwrap_or_default();
+
+            // check if within tolerances
+            let angular_velocity = drivetrain.tracking.angular_velocity();
+            if angular_tolerances.check(error.as_radians(), angular_velocity) {
+                break;
+            }
 
             // update controller
             let dt = prev_time.elapsed();
