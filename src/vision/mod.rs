@@ -10,8 +10,6 @@ use evian::{
     prelude::{Drivetrain, Tolerances, TracksForwardTravel, TracksVelocity},
     tracking::Tracking,
 };
-use simple_moving_average::SMA;
-use simple_moving_average::SingleSumSMA;
 use vexide::{
     math::Point2,
     prelude::AiVisionSensor,
@@ -19,9 +17,10 @@ use vexide::{
     time::sleep,
 };
 
-use crate::vision::filters::VisionFilter;
+use crate::vision::{filters::VisionFilter, sorters::VisionSorter};
 
 pub mod filters;
+pub mod sorters;
 
 /// Wrapper around [`AiVisionObject::Color`].
 #[allow(clippy::missing_docs_in_private_items, reason = "wrapper")]
@@ -35,7 +34,7 @@ pub struct Color {
 /// Abstraction over vision sensor for better tracking.
 ///
 /// `SMA` is the size of the simple moving average window
-struct VisionSensorAbstraction<'a, F: VisionFilter> {
+struct VisionSensorAbstraction<'a, F: VisionFilter, S: VisionSorter> {
     /// The vision sensor
     sensor: &'a AiVisionSensor,
     /// The id of the color object we are tracking.
@@ -43,9 +42,12 @@ struct VisionSensorAbstraction<'a, F: VisionFilter> {
 
     /// Filter used to filter out extra objects.
     filter: F,
+
+    /// Sorter used to pick objects.
+    sorter: S,
 }
 
-impl<'a, F: VisionFilter> VisionSensorAbstraction<'a, F> {
+impl<'a, F: VisionFilter, S: VisionSorter> VisionSensorAbstraction<'a, F, S> {
     /// Update the vision sensor and get an angle value back.
     ///
     /// # Errors
@@ -83,11 +85,12 @@ impl<'a, F: VisionFilter> VisionSensorAbstraction<'a, F> {
     }
 
     /// Create a new instance.
-    fn new(sensor: &'a AiVisionSensor, object_id: u8, filter: F) -> Self {
+    fn new(sensor: &'a AiVisionSensor, object_id: u8, filter: F, sorter: S) -> Self {
         Self {
             sensor,
             object_id,
             filter,
+            sorter,
         }
     }
 }
@@ -97,6 +100,7 @@ pub struct VisionTrack<
     FA: Feedback<State = Angle, Signal = f64>,
     FL: Feedback<State = f64, Signal = f64>,
     F: VisionFilter,
+    S: VisionSorter,
 > {
     /// The angular controller used for turning.
     ///
@@ -115,13 +119,17 @@ pub struct VisionTrack<
 
     /// Vision sensor filter.
     pub filter: F,
+
+    /// Vision sensor sorter.
+    pub sorter: S,
 }
 
 impl<
     FA: Feedback<State = Angle, Signal = f64> + Clone,
     FL: Feedback<State = f64, Signal = f64> + Clone,
     F: VisionFilter + Clone,
-> VisionTrack<FA, FL, F>
+    S: VisionSorter + Clone,
+> VisionTrack<FA, FL, F, S>
 {
     /// Point to face a vision sensor object.
     ///
@@ -139,8 +147,12 @@ impl<
         // state
         let mut controller = self.angular_controller.clone();
         let mut prev_time = Instant::now();
-        let mut sensor =
-            VisionSensorAbstraction::new(vision_sensor, object_id, self.filter.clone());
+        let mut sensor = VisionSensorAbstraction::new(
+            vision_sensor,
+            object_id,
+            self.filter.clone(),
+            self.sorter.clone(),
+        );
 
         // TODO: add settling to this
         loop {
@@ -182,8 +194,12 @@ impl<
         let mut linear_controller = self.linear_controller.clone();
         let mut linear_tolerances = self.linear_tolerances;
         let mut prev_time = Instant::now();
-        let mut sensor =
-            VisionSensorAbstraction::new(vision_sensor, object_id, self.filter.clone());
+        let mut sensor = VisionSensorAbstraction::new(
+            vision_sensor,
+            object_id,
+            self.filter.clone(),
+            self.sorter.clone(),
+        );
 
         // initial state
         let target_travel = drivetrain.tracking.forward_travel() + distance;
@@ -242,8 +258,12 @@ impl<
     ///
     /// The future will also complete if the vision sensor returns an error.
     pub async fn wait_none(&self, vision_sensor: &AiVisionSensor, object_id: u8) {
-        let mut sensor =
-            VisionSensorAbstraction::new(vision_sensor, object_id, self.filter.clone());
+        let mut sensor = VisionSensorAbstraction::new(
+            vision_sensor,
+            object_id,
+            self.filter.clone(),
+            self.sorter.clone(),
+        );
 
         while sensor.update().is_ok() {
             sleep(AiVisionSensor::UPDATE_INTERVAL).await;
