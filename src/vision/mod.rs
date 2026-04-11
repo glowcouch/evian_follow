@@ -19,15 +19,14 @@ use vexide::{
     time::sleep,
 };
 
+pub mod filters;
+
 /// Wrapper around [`AiVisionObject::Color`].
-struct Color {
-    #[allow(clippy::missing_docs_in_private_items)]
+#[allow(clippy::missing_docs_in_private_items, reason = "wrapper")]
+pub struct Color {
     id: u8,
-    #[allow(clippy::missing_docs_in_private_items)]
     position: Point2<u16>,
-    #[allow(clippy::missing_docs_in_private_items)]
     width: u16,
-    #[allow(clippy::missing_docs_in_private_items)]
     height: u16,
 }
 
