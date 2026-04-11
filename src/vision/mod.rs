@@ -75,7 +75,7 @@ impl<'a, F: VisionFilter, S: VisionSorter> VisionSensorAbstraction<'a, F, S> {
             })
             .filter(|c| c.id == self.object_id)
             .filter(|c| self.filter.filter(c))
-            .max_by_key(|c| c.width * c.height)
+            .max_by(|a, b| self.sorter.cmp(a, b))
             .context("no objects detected")?;
 
         // calculate new error
