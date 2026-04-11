@@ -10,8 +10,6 @@ use evian::{
     prelude::{Drivetrain, Tolerances, TracksForwardTravel, TracksVelocity},
     tracking::Tracking,
 };
-use simple_moving_average::SMA;
-use simple_moving_average::SingleSumSMA;
 use vexide::{
     math::Point2,
     prelude::AiVisionSensor,
@@ -19,31 +17,37 @@ use vexide::{
     time::sleep,
 };
 
+use crate::vision::{filters::VisionFilter, sorters::VisionSorter};
+
+pub mod filters;
+pub mod sorters;
+
 /// Wrapper around [`AiVisionObject::Color`].
-struct Color {
-    #[allow(clippy::missing_docs_in_private_items)]
+#[allow(clippy::missing_docs_in_private_items, reason = "wrapper")]
+pub struct Color {
     id: u8,
-    #[allow(clippy::missing_docs_in_private_items)]
     position: Point2<u16>,
-    #[allow(clippy::missing_docs_in_private_items)]
     width: u16,
-    #[allow(clippy::missing_docs_in_private_items)]
     height: u16,
 }
 
 /// Abstraction over vision sensor for better tracking.
 ///
 /// `SMA` is the size of the simple moving average window
-struct VisionSensorAbstraction<'a, const SMA_WINDOW: usize> {
+struct VisionSensorAbstraction<'a, F: VisionFilter, S: VisionSorter> {
     /// The vision sensor
     sensor: &'a AiVisionSensor,
     /// The id of the color object we are tracking.
     object_id: u8,
-    /// SMA used to average the angle.
-    sma: SingleSumSMA<Angle, f64, SMA_WINDOW>,
+
+    /// Filter used to filter out extra objects.
+    filter: F,
+
+    /// Sorter used to pick objects.
+    sorter: S,
 }
 
-impl<'a, const SMA_WINDOW: usize> VisionSensorAbstraction<'a, SMA_WINDOW> {
+impl<'a, F: VisionFilter, S: VisionSorter> VisionSensorAbstraction<'a, F, S> {
     /// Update the vision sensor and get an angle value back.
     ///
     /// # Errors
@@ -70,22 +74,23 @@ impl<'a, const SMA_WINDOW: usize> VisionSensorAbstraction<'a, SMA_WINDOW> {
                 _ => None,
             })
             .filter(|c| c.id == self.object_id)
-            .max_by_key(|c| c.width * c.height)
+            .filter(|c| self.filter.filter(c))
+            .max_by(|a, b| self.sorter.cmp(a, b))
             .context("no objects detected")?;
 
-        // calculate new error using sma
+        // calculate new error
         let error = color_angle(&biggest).wrapped_half();
-        self.sma.add_sample(error);
 
-        Ok(self.sma.get_average())
+        Ok(error)
     }
 
     /// Create a new instance.
-    fn new(sensor: &'a AiVisionSensor, object_id: u8) -> Self {
+    fn new(sensor: &'a AiVisionSensor, object_id: u8, filter: F, sorter: S) -> Self {
         Self {
             sensor,
             object_id,
-            sma: SingleSumSMA::from_zero(Angle::ZERO),
+            filter,
+            sorter,
         }
     }
 }
@@ -94,6 +99,8 @@ impl<'a, const SMA_WINDOW: usize> VisionSensorAbstraction<'a, SMA_WINDOW> {
 pub struct VisionTrack<
     FA: Feedback<State = Angle, Signal = f64>,
     FL: Feedback<State = f64, Signal = f64>,
+    F: VisionFilter,
+    S: VisionSorter,
 > {
     /// The angular controller used for turning.
     ///
@@ -109,12 +116,20 @@ pub struct VisionTrack<
     ///
     /// Takes the robot's distance from the target.
     pub linear_tolerances: Tolerances,
+
+    /// Vision sensor filter.
+    pub filter: F,
+
+    /// Vision sensor sorter.
+    pub sorter: S,
 }
 
 impl<
     FA: Feedback<State = Angle, Signal = f64> + Clone,
     FL: Feedback<State = f64, Signal = f64> + Clone,
-> VisionTrack<FA, FL>
+    F: VisionFilter + Clone,
+    S: VisionSorter + Clone,
+> VisionTrack<FA, FL, F, S>
 {
     /// Point to face a vision sensor object.
     ///
@@ -132,7 +147,12 @@ impl<
         // state
         let mut controller = self.angular_controller.clone();
         let mut prev_time = Instant::now();
-        let mut sensor = VisionSensorAbstraction::<3>::new(vision_sensor, object_id);
+        let mut sensor = VisionSensorAbstraction::new(
+            vision_sensor,
+            object_id,
+            self.filter.clone(),
+            self.sorter.clone(),
+        );
 
         // TODO: add settling to this
         loop {
@@ -174,7 +194,12 @@ impl<
         let mut linear_controller = self.linear_controller.clone();
         let mut linear_tolerances = self.linear_tolerances;
         let mut prev_time = Instant::now();
-        let mut sensor = VisionSensorAbstraction::<3>::new(vision_sensor, object_id);
+        let mut sensor = VisionSensorAbstraction::new(
+            vision_sensor,
+            object_id,
+            self.filter.clone(),
+            self.sorter.clone(),
+        );
 
         // initial state
         let target_travel = drivetrain.tracking.forward_travel() + distance;
@@ -233,7 +258,12 @@ impl<
     ///
     /// The future will also complete if the vision sensor returns an error.
     pub async fn wait_none(&self, vision_sensor: &AiVisionSensor, object_id: u8) {
-        let mut sensor = VisionSensorAbstraction::<3>::new(vision_sensor, object_id);
+        let mut sensor = VisionSensorAbstraction::new(
+            vision_sensor,
+            object_id,
+            self.filter.clone(),
+            self.sorter.clone(),
+        );
 
         while sensor.update().is_ok() {
             sleep(AiVisionSensor::UPDATE_INTERVAL).await;

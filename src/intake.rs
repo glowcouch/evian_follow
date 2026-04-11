@@ -4,7 +4,6 @@
 //!
 //! "Efficiency" is becoming more and more of a misnomer.
 
-use core::error::Error;
 use core::fmt::Debug;
 use core::time::Duration;
 
