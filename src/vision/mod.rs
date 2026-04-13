@@ -130,6 +130,38 @@ pub struct VisionTrack<
 }
 
 impl<
+    FA: Feedback<State = Angle, Signal = f64>,
+    FL: Feedback<State = f64, Signal = f64>,
+    F: VisionFilter,
+    S: VisionSorter,
+> VisionTrack<FA, FL, F, S>
+{
+    /// Returns a new [`VisionTrack`] with the given filter,
+    pub fn with_filter<F2: VisionFilter>(self, filter: F2) -> VisionTrack<FA, FL, F2, S> {
+        VisionTrack {
+            angular_controller: self.angular_controller,
+            linear_controller: self.linear_controller,
+            linear_tolerances: self.linear_tolerances,
+            angular_tolerances: self.angular_tolerances,
+            filter,
+            sorter: self.sorter,
+        }
+    }
+
+    /// Returns a new [`VisionTrack`] with the given sorter
+    pub fn with_sorter<S2: VisionSorter>(self, sorter: S2) -> VisionTrack<FA, FL, F, S2> {
+        VisionTrack {
+            angular_controller: self.angular_controller,
+            linear_controller: self.linear_controller,
+            linear_tolerances: self.linear_tolerances,
+            angular_tolerances: self.angular_tolerances,
+            filter: self.filter,
+            sorter,
+        }
+    }
+}
+
+impl<
     FA: Feedback<State = Angle, Signal = f64> + Clone,
     FL: Feedback<State = f64, Signal = f64> + Clone,
     F: VisionFilter + Clone,
