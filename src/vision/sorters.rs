@@ -21,3 +21,24 @@ impl VisionSorter for AreaSorter {
         (b.width * b.height).cmp(&(a.width * a.height))
     }
 }
+
+// Sort objects by their position on an axis.
+#[allow(missing_docs, reason = "it's fairly obvious")]
+#[derive(Debug, Clone)]
+pub enum AxisSorter {
+    HighestY,
+    HighestX,
+    LowestY,
+    LowestX,
+}
+
+impl VisionSorter for AxisSorter {
+    fn cmp(&self, a: &Color, b: &Color) -> Ordering {
+        match self {
+            Self::HighestY => a.position.y.cmp(&b.position.y),
+            Self::HighestX => a.position.x.cmp(&b.position.x),
+            Self::LowestY => b.position.y.cmp(&a.position.y),
+            Self::LowestX => b.position.x.cmp(&a.position.x),
+        }
+    }
+}
