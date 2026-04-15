@@ -6,8 +6,15 @@ pub struct Differentiate {
     prev: Option<f64>,
 }
 
+impl Default for Differentiate {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Differentiate {
     /// Construct a new instance of [`Differentiate`] with no samples.
+    #[must_use]
     pub fn new() -> Self {
         Self { prev: None }
     }

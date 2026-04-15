@@ -12,11 +12,13 @@ pub struct Ema {
 
 impl Ema {
     /// Construct a new instance with no samples and a given smoothing factor.
+    #[must_use] 
     pub fn new(alpha: f64) -> Self {
         Self { alpha, value: None }
     }
 
     /// Get the current value
+    #[must_use] 
     pub fn value(&self) -> Option<f64> {
         self.value
     }
