@@ -7,7 +7,7 @@ use evian::{
     control::loops::Feedback,
     drivetrain::model::{Arcade, DrivetrainModel},
     math::Angle,
-    prelude::{Drivetrain, Tolerances, TracksForwardTravel, TracksVelocity},
+    prelude::{Drivetrain, Tolerances, TracksForwardTravel, TracksHeading, TracksVelocity},
     tracking::Tracking,
 };
 use vexide::{
@@ -17,7 +17,10 @@ use vexide::{
     time::sleep,
 };
 
-use crate::vision::{filters::VisionFilter, sorters::VisionSorter};
+use crate::{
+    util::ema::Ema,
+    vision::{filters::VisionFilter, sorters::VisionSorter},
+};
 
 pub mod filters;
 pub mod sorters;
@@ -32,13 +35,20 @@ pub struct Color {
 }
 
 /// Abstraction over vision sensor for better tracking.
-///
-/// `SMA` is the size of the simple moving average window
-struct VisionSensorAbstraction<'a, F: VisionFilter, S: VisionSorter> {
+pub struct VisionSensorAbstraction<'a, 'b, F: VisionFilter, S: VisionSorter, T: TracksHeading> {
+    /// The drivetrain tracking.
+    ///
+    /// Used to calculate absolute heading.
+    tracking: &'b T,
+
     /// The vision sensor
     sensor: &'a AiVisionSensor,
+
     /// The id of the color object we are tracking.
     object_id: u8,
+
+    /// The smoothing filter used to smooth the absolute heading.
+    smoothing: Ema,
 
     /// Filter used to filter out extra objects.
     filter: F,
@@ -47,13 +57,15 @@ struct VisionSensorAbstraction<'a, F: VisionFilter, S: VisionSorter> {
     sorter: S,
 }
 
-impl<'a, F: VisionFilter, S: VisionSorter> VisionSensorAbstraction<'a, F, S> {
-    /// Update the vision sensor and get an angle value back.
+impl<'a, 'b, F: VisionFilter, S: VisionSorter, T: TracksHeading>
+    VisionSensorAbstraction<'a, 'b, F, S, T>
+{
+    /// Update the vision sensor and get an absolute heading back.
     ///
     /// # Errors
     /// - Will return an error if the vision sensor returns an error.
     /// - Will return an error if no objects of `object_id` are detected.
-    fn update(&mut self) -> anyhow::Result<Angle> {
+    pub fn update(&mut self) -> anyhow::Result<Angle> {
         let objects = self.sensor.objects()?;
 
         // find biggest color object
@@ -81,16 +93,31 @@ impl<'a, F: VisionFilter, S: VisionSorter> VisionSensorAbstraction<'a, F, S> {
         // calculate new error
         let error = color_angle(&biggest).wrapped_half();
 
-        Ok(error)
+        // the heading of the object (absolute)
+        let heading = (self.tracking.heading() + error).wrapped_half();
+
+        // Smooth the heading
+        let smoothed_heading = Angle::from_radians(self.smoothing.next(heading.as_radians()));
+
+        Ok(smoothed_heading)
     }
 
     /// Create a new instance.
-    fn new(sensor: &'a AiVisionSensor, object_id: u8, filter: F, sorter: S) -> Self {
+    pub fn new(
+        sensor: &'a AiVisionSensor,
+        object_id: u8,
+        filter: F,
+        sorter: S,
+        tracking: &'b T,
+        ema_smootheness: f64,
+    ) -> Self {
         Self {
+            tracking,
             sensor,
             object_id,
             filter,
             sorter,
+            smoothing: Ema::new(ema_smootheness),
         }
     }
 }
@@ -127,6 +154,9 @@ pub struct VisionTrack<
 
     /// Vision sensor sorter.
     pub sorter: S,
+
+    /// Smoothing factor for the absolute heading.
+    pub heading_smootheness: f64,
 }
 
 impl<
@@ -145,6 +175,7 @@ impl<
             angular_tolerances: self.angular_tolerances,
             filter,
             sorter: self.sorter,
+            heading_smootheness: self.heading_smootheness,
         }
     }
 
@@ -157,6 +188,7 @@ impl<
             angular_tolerances: self.angular_tolerances,
             filter: self.filter,
             sorter,
+            heading_smootheness: self.heading_smootheness,
         }
     }
 }
@@ -175,7 +207,7 @@ impl<
     /// # Errors
     ///
     /// Will return an error if no object is detected by the vision sensor (or it is disconnected).
-    pub async fn turn_to_object<M: Arcade, T: Tracking + TracksVelocity>(
+    pub async fn turn_to_object<M: Arcade, T: Tracking + TracksVelocity + TracksHeading>(
         &self,
         drivetrain: &mut Drivetrain<M, T>,
         vision_sensor: &AiVisionSensor,
@@ -189,27 +221,33 @@ impl<
             object_id,
             self.filter.clone(),
             self.sorter.clone(),
+            &drivetrain.tracking,
+            self.heading_smootheness,
         );
         let mut angular_tolerances = self.angular_tolerances;
 
         loop {
             sleep(AiVisionSensor::UPDATE_INTERVAL).await;
 
-            let error = sensor
+            let object_heading = sensor
                 .update()
                 .inspect_err(|e| tracing::error!("vision sensor error: {e}"))
                 .unwrap_or_default();
 
+            let heading = drivetrain.tracking.heading();
+
+            let angular_error = object_heading - heading;
+
             // check if within tolerances
             let angular_velocity = drivetrain.tracking.angular_velocity();
-            if angular_tolerances.check(error.as_radians(), angular_velocity) {
+            if angular_tolerances.check(angular_error.as_radians(), angular_velocity) {
                 break;
             }
 
             // update controller
             let dt = prev_time.elapsed();
             prev_time = Instant::now();
-            let steer = controller.update(error, Angle::ZERO, dt);
+            let steer = controller.update(heading, object_heading, dt);
 
             // drive robot
             drop(drivetrain.model.drive_arcade(0., steer));
@@ -223,7 +261,10 @@ impl<
     /// # Errors
     ///
     /// Will return an error if no object is detected by the vision sensor (or it is disconnected).
-    pub async fn drive_towards_object<M: Arcade, T: TracksForwardTravel + TracksVelocity>(
+    pub async fn drive_towards_object<
+        M: Arcade,
+        T: TracksForwardTravel + TracksVelocity + TracksHeading,
+    >(
         &self,
         drivetrain: &mut Drivetrain<M, T>,
         vision_sensor: &AiVisionSensor,
@@ -242,6 +283,8 @@ impl<
             object_id,
             self.filter.clone(),
             self.sorter.clone(),
+            &drivetrain.tracking,
+            self.heading_smootheness,
         );
 
         // initial state
@@ -251,16 +294,21 @@ impl<
             sleep(AiVisionSensor::UPDATE_INTERVAL).await;
 
             // get values
-            let angular_error = sensor
+            let object_heading = sensor
                 .update()
                 .inspect_err(|e| tracing::error!("vision sensor error: {e}"))
                 .unwrap_or_default();
             let dt = prev_time.elapsed();
             prev_time = Instant::now();
 
+            let heading = drivetrain.tracking.heading();
+
+            // find angular error
+            let angular_error = object_heading - heading;
+
             // update angular controller
             let steer = angular_controller
-                .update(angular_error, Angle::ZERO, dt)
+                .update(heading, object_heading, dt)
                 .clamp(-1., 1.);
 
             // update linear controller
@@ -300,12 +348,20 @@ impl<
     /// # Errors
     ///
     /// The future will also complete if the vision sensor returns an error.
-    pub async fn wait_none(&self, vision_sensor: &AiVisionSensor, object_id: u8) {
+    pub async fn wait_none<T: TracksHeading>(
+        &self,
+        vision_sensor: &AiVisionSensor,
+        object_id: u8,
+        // It's kind of silly to have this take a tracking implementation.
+        tracking: &T,
+    ) {
         let mut sensor = VisionSensorAbstraction::new(
             vision_sensor,
             object_id,
             self.filter.clone(),
             self.sorter.clone(),
+            tracking,
+            self.heading_smootheness,
         );
 
         while sensor.update().is_ok() {

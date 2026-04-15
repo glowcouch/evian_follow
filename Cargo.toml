@@ -6,7 +6,6 @@ edition = "2024"
 [dependencies]
 evian = { git = "https://github.com/vexide/evian.git" }
 vexide = "0.8.0"
-simple_moving_average = "1.0.2"
 anyhow = "1.0.102"
 tracing = { version = "0.1.44", default-features = false }
 vexide-motorgroup = "2.2.0"
