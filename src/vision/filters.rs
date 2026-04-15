@@ -85,3 +85,13 @@ impl VisionFilter for SizeFilter {
         self.height_range.contains(&object.height) && self.width_range.contains(&object.width)
     }
 }
+
+/// Inverts the filter `T`.
+#[derive(Debug, Clone)]
+pub struct Not<T: VisionFilter>(pub T);
+
+impl<T: VisionFilter> VisionFilter for Not<T> {
+    fn filter(&self, object: &Color) -> bool {
+        !self.0.filter(object)
+    }
+}
