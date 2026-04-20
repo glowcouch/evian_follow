@@ -56,6 +56,10 @@ impl<'a, F: VisionFilter, S: VisionSorter> VisionSensorAbstraction<'a, F, S> {
     fn update(&mut self) -> anyhow::Result<Angle> {
         let objects = self.sensor.objects()?;
 
+        if objects.is_empty() {
+            return Err(anyhow::anyhow!("no objects detected"));
+        }
+
         // find biggest color object
         let biggest = objects
             .iter()
@@ -76,7 +80,7 @@ impl<'a, F: VisionFilter, S: VisionSorter> VisionSensorAbstraction<'a, F, S> {
             .filter(|c| c.id == self.object_id)
             .filter(|c| self.filter.filter(c))
             .max_by(|a, b| self.sorter.cmp(a, b))
-            .context("no objects detected")?;
+            .context("no valid objects found")?;
 
         // calculate new error
         let error = color_angle(&biggest).wrapped_half();
