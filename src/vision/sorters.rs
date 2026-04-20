@@ -22,23 +22,37 @@ impl VisionSorter for AreaSorter {
     }
 }
 
-// Sort objects by their position on an axis.
-#[allow(missing_docs, reason = "it's fairly obvious")]
+/// Sort objects by their position on an axis.
 #[derive(Debug, Clone)]
 pub enum AxisSorter {
-    HighestY,
-    HighestX,
-    LowestY,
-    LowestX,
+    /// Sort by the topmost y position.
+    Topmost,
+
+    /// Sort by the rightmost x position.
+    ///
+    /// Uses the right edge of the object (i.e. the object's x position plus its width).
+    Rightmost,
+
+    /// Sort by the bottommost y position.
+    ///
+    /// Uses the bottom edge of the object (i.e. the object's y position plus its height).
+    Bottommost,
+
+    /// Sort by the leftmost x position.
+    Reftmost,
 }
 
 impl VisionSorter for AxisSorter {
     fn cmp(&self, a: &Color, b: &Color) -> Ordering {
         match self {
-            Self::HighestY => a.position.y.cmp(&b.position.y),
-            Self::HighestX => a.position.x.cmp(&b.position.x),
-            Self::LowestY => b.position.y.cmp(&a.position.y),
-            Self::LowestX => b.position.x.cmp(&a.position.x),
+            // lowest y value
+            Self::Topmost => b.position.y.cmp(&a.position.y),
+            // lowest x value
+            Self::Reftmost => b.position.x.cmp(&a.position.x),
+            // highest right edge
+            Self::Rightmost => (a.position.x + a.width).cmp(&(b.position.x + b.width)),
+            // highest bottom edge
+            Self::Bottommost => (a.position.y + a.height).cmp(&(b.position.y + b.height)),
         }
     }
 }
